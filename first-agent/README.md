@@ -172,9 +172,40 @@ A: 確保瀏覽器允許麥克風權限，並且使用 HTTPS 或 localhost。
 
 ## 🔐 安全注意事項
 
-- 不要在客戶端代碼中硬編碼 API Key
-- 生產環境中使用後端代理 API 調用
-- 定期檢查 API 使用量
+### API Key 管理
+- ❌ **絕對不要** 在客戶端代碼中硬編碼 API Key
+- ❌ **絕對不要** 將 `.env` 文件提交到 git
+- ✅ 使用 `.env` 文件在本地開發（已加入 `.gitignore`）
+- ✅ 生產環境中使用環境變量或安全的配置管理
+- ✅ 定期輪換 API Key
+
+### 設置步驟
+1. 複製 `.env.example` 為 `.env`：
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 在 `.env` 中填入你的 API Key：
+   ```
+   OPENAI_API_KEY=your_actual_api_key_here
+   ```
+
+3. 確保 `.env` 不會被提交：
+   ```bash
+   git status  # .env 不應該出現在未跟蹤文件中
+   ```
+
+### 生產環境建議
+- 使用後端代理 API 調用
+- 實施 API 調用限制和監控
+- 定期檢查 API 使用量和費用
+- 使用 HTTPS 加密傳輸
+
+### 如果意外洩露 API Key
+1. 立即到 [OpenAI Dashboard](https://platform.openai.com/api-keys) 撤銷舊的 API Key
+2. 生成新的 API Key
+3. 更新你的 `.env` 文件
+4. 清理 git 歷史（如本項目已完成）
 
 ## 📄 許可證
 
