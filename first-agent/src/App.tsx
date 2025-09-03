@@ -339,6 +339,90 @@ function App() {
               >
                 🎭 模擬完整對話
               </button>
+              
+              <button 
+                onClick={() => (window as any).testCurrentTimeTool?.()}
+                style={{
+                  backgroundColor: '#FF5722',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🕒 測試時間工具
+              </button>
+              
+              <button 
+                onClick={() => (window as any).simulateTimeQuery?.()}
+                style={{
+                  backgroundColor: '#795548',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                ⏰ 模擬時間查詢
+              </button>
+              
+              <button 
+                onClick={() => (window as any).debugSession?.()}
+                style={{
+                  backgroundColor: '#E91E63',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🔍 調試 Session
+              </button>
+              
+              <button 
+                onClick={() => (window as any).sendManualToolCall?.()}
+                style={{
+                  backgroundColor: '#3F51B5',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🛠️ 手動工具調用
+              </button>
+              
+              <button 
+                onClick={() => (window as any).forceCompleteResponse?.()}
+                style={{
+                  backgroundColor: '#F44336',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🚨 強制完成回應
+              </button>
+              
+              <button 
+                onClick={() => (window as any).sendTimeResult?.()}
+                style={{
+                  backgroundColor: '#FF9800',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                ⏰ 手動發送時間
+              </button>
             </div>
             
             {/* Debug panel */}
