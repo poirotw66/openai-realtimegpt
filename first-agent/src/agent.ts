@@ -121,7 +121,7 @@ function getCurrentTime(params: { format?: string; timezone?: string } = {}): an
     if (messageCallback) {
       messageCallback({
         role: 'assistant',
-        content: `❌ 時間查詢失敗: ${error}`,
+        content: `❌ 時間查詢失敗: ${String(error)}`,
         timestamp: new Date(),
         isStreaming: false
       }, `time-error-${Date.now()}`);
