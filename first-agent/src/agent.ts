@@ -6,9 +6,9 @@ const agent = new RealtimeAgent({
   instructions: 'You are a helpful assistant. Always respond in the same language as the user. 如果用戶說中文，請用中文回答。',
 });
 
-// Create a Realtime Session
+// Create a Realtime Session. gpt-4o-mini-realtime-preview gpt-realtime gpt-4o-realtime-preview	
 const session = new RealtimeSession(agent, {
-  model: 'gpt-4o-realtime-preview',
+  model: 'gpt-4o-mini-realtime-preview',
 });
 
 // Store the message callback function
