@@ -6,6 +6,8 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  isStreaming?: boolean;
+  messageId?: string;
 }
 
 function App() {
@@ -25,10 +27,41 @@ function App() {
 
   // Set up message callback when component mounts
   useEffect(() => {
-    setMessageCallback((message: Message) => {
-      console.log('Message received:', message)
-      setMessages(prev => [...prev, message])
-      addDebugInfo(`新消息: ${message.role} - ${message.content.substring(0, 50)}...`)
+    setMessageCallback((message: Message, messageId?: string) => {
+      console.log('Message received:', message, 'ID:', messageId)
+      
+      setMessages(prev => {
+        // If this is a streaming update for an existing message, update it
+        if (messageId && message.isStreaming) {
+          const existingIndex = prev.findIndex(m => m.messageId === messageId)
+          if (existingIndex !== -1) {
+            const newMessages = [...prev]
+            newMessages[existingIndex] = { ...message, messageId }
+            return newMessages
+          } else {
+            // New streaming message
+            return [...prev, { ...message, messageId }]
+          }
+        } else {
+          // Final message or new message without streaming
+          const finalMessage = { ...message, messageId: messageId || `${message.role}-${Date.now()}`, isStreaming: false }
+          
+          // If this was a streaming message, replace it
+          if (messageId) {
+            const existingIndex = prev.findIndex(m => m.messageId === messageId)
+            if (existingIndex !== -1) {
+              const newMessages = [...prev]
+              newMessages[existingIndex] = finalMessage
+              return newMessages
+            }
+          }
+          
+          // Add as new message
+          return [...prev, finalMessage]
+        }
+      })
+      
+      addDebugInfo(`新消息: ${message.role} - ${message.content.substring(0, 50)}... (${message.isStreaming ? '流式中' : '完成'})`)
     })
   }, [])
 
@@ -177,9 +210,12 @@ function App() {
               ) : (
                 <div>
                   {messages.map((message, index) => (
-                    <div key={index} className={`message ${message.role}`}>
+                    <div key={message.messageId || index} className={`message ${message.role}`}>
                       <div className={`message-header ${message.role}`}>
                         {message.role === 'user' ? '🎤 您說' : '🤖 AI 回答'}
+                        {message.isStreaming && (
+                          <span className="streaming-indicator">⚡ 即時中...</span>
+                        )}
                         <span className="timestamp">
                           {message.timestamp.toLocaleTimeString()}
                         </span>
@@ -187,9 +223,22 @@ function App() {
                       <div className="message-content" style={{
                         fontSize: '1.1em',
                         lineHeight: '1.6',
-                        wordWrap: 'break-word'
+                        wordWrap: 'break-word',
+                        opacity: message.isStreaming ? 0.8 : 1,
+                        borderLeft: message.isStreaming ? '3px solid #4CAF50' : 'none',
+                        paddingLeft: message.isStreaming ? '10px' : '0'
                       }}>
                         {message.content}
+                        {message.isStreaming && (
+                          <span className="typing-cursor" style={{
+                            display: 'inline-block',
+                            width: '2px',
+                            height: '1.2em',
+                            backgroundColor: '#4CAF50',
+                            marginLeft: '2px',
+                            animation: 'blink 1s infinite'
+                          }}>▌</span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -261,6 +310,34 @@ function App() {
                 }}
               >
                 🔧 測試事件系統
+              </button>
+              
+              <button 
+                onClick={() => (window as any).testEventListeners?.()}
+                style={{
+                  backgroundColor: '#607D8B',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🔍 檢查事件監聽器
+              </button>
+              
+              <button 
+                onClick={() => (window as any).simulateConversation?.()}
+                style={{
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                🎭 模擬完整對話
               </button>
             </div>
             
