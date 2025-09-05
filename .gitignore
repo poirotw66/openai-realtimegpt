@@ -43,3 +43,7 @@ node_modules/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.python-version
+*__init__.py
+*__init__
+*__init__.cpython-313.pyc

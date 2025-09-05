@@ -1,0 +1,18 @@
+[project]
+name = "grounding-mcp"
+version = "0.1.0"
+description = "MCP server for Google search grounding using GenAI API"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-genai>=1.33.0",
+    "mcp[cli]>=1.13.1",
+    "python-dotenv>=1.1.1",
+]
+
+[project.scripts]
+grounding-mcp-server = "grounding_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
