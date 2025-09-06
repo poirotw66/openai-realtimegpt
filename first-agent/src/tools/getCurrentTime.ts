@@ -108,20 +108,20 @@ async function getCurrentTimeInvoke(runContext: any, input: string): Promise<any
 }
 
 export const getCurrentTimeTool = {
-  type: 'function',
+  type: 'function' as const,
   name: 'get_current_time',
   description: 'Get the current date and time. Use this when users ask about time, date, or current moment.',
   parameters: {
-    type: 'object',
+    type: 'object' as const,
     properties: {
       format: {
-        type: 'string',
+        type: 'string' as const,
         description: 'The format for the time display',
         enum: ['full', 'time_only', 'date_only'],
         default: 'full'
       },
       timezone: {
-        type: 'string', 
+        type: 'string' as const, 
         description: 'The timezone to display time in',
         default: 'Asia/Taipei'
       }
