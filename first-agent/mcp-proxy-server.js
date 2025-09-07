@@ -9,62 +9,50 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// MCP 服務器通信函數
-async function callMCPServer(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const mcpServerPath = path.resolve('..', 'grounding-mcp');
-    const uvPath = '/Users/cfh00896102/.local/bin/uv';
+const uvPath = '/Users/cfh00896102/.local/bin/uv';
 
-    // 創建 MCP 請求序列
+const mcpServers = {
+  grounding: {
+    path: path.resolve('..', 'grounding-mcp'),
+    command: ['run', 'python', 'grounding_mcp/server.py'],
+    tools: ['grounded_search'] // Assuming this is the tool name, based on MCP_SETUP_GUIDE.md
+  },
+  rag: {
+    path: path.resolve('..', 'mcp_rag_server'),
+    command: ['run', 'python', 'server.py'],
+    tools: ['ask_m365_question', 'search_knowledge_base', 'get_page_context']
+  }
+};
+
+// Function to call a specific MCP server
+async function callSpecificMCPServer(serverConfig, method, params = {}) {
+  return new Promise((resolve, reject) => {
     const requests = [];
-    
-    // Initialize request
     requests.push(JSON.stringify({
       "jsonrpc": "2.0",
       "id": 1,
       "method": "initialize",
       "params": {
         "protocolVersion": "2024-11-05",
-        "capabilities": {
-          "tools": {}
-        },
-        "clientInfo": {
-          "name": "first-agent",
-          "version": "1.0.0"
-        }
+        "capabilities": { "tools": {} },
+        "clientInfo": { "name": "first-agent", "version": "1.0.0" }
       }
     }));
+    requests.push(JSON.stringify({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
 
-    // Initialized notification
-    requests.push(JSON.stringify({
-      "jsonrpc": "2.0",
-      "method": "notifications/initialized"
-    }));
-
-    // 添加實際的方法調用
     if (method === 'tools/list') {
-      requests.push(JSON.stringify({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-        "params": {}
-      }));
+      requests.push(JSON.stringify({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }));
     } else if (method === 'tools/call') {
-      requests.push(JSON.stringify({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/call",
-        "params": params
-      }));
+      requests.push(JSON.stringify({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": params }));
     }
 
     const inputData = requests.join('\n') + '\n';
 
-    console.log('🔧 Calling MCP server:', method, params);
+    console.log(`🔧 Calling MCP server at ${serverConfig.path}:`, method, params);
     console.log('📨 Sending requests:', requests);
 
-    const child = spawn(uvPath, ['run', 'python', 'grounding_mcp/server.py'], {
-      cwd: mcpServerPath,
+    const child = spawn(uvPath, serverConfig.command, {
+      cwd: serverConfig.path,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -75,22 +63,14 @@ async function callMCPServer(method, params = {}) {
     let stdout = '';
     let stderr = '';
 
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
+    child.stdout.on('data', (data) => { stdout += data.toString(); });
+    child.stderr.on('data', (data) => { stderr += data.toString(); });
 
     child.on('close', (code) => {
-      console.log('MCP server process closed with code:', code);
-
+      console.log(`MCP server process at ${serverConfig.path} closed with code:`, code);
       try {
         const lines = stdout.trim().split('\n');
         let result = null;
-
-        // 查找 id: 2 的響應（我們的實際請求）
         for (const line of lines) {
           if (line.trim()) {
             const response = JSON.parse(line);
@@ -105,7 +85,6 @@ async function callMCPServer(method, params = {}) {
             }
           }
         }
-
         if (result !== null) {
           resolve(result);
         } else {
@@ -120,30 +99,34 @@ async function callMCPServer(method, params = {}) {
     });
 
     child.on('error', (error) => {
-      console.error('Error spawning MCP server:', error);
+      console.error(`Error spawning MCP server at ${serverConfig.path}:`, error);
       reject(error);
     });
 
-    // 發送輸入到 MCP 服務器
     child.stdin.write(inputData);
     child.stdin.end();
   });
 }
 
-// API 端點：列出可用工具
+// API endpoint to list all tools from all servers
 app.get('/api/mcp/tools', async (req, res) => {
   try {
-    console.log('📡 GET /api/mcp/tools - Listing available tools');
+    console.log('📡 GET /api/mcp/tools - Listing available tools from all servers');
     
-    const result = await callMCPServer('tools/list');
-    
-    console.log('✅ Tools listed successfully:', result);
+    const toolPromises = Object.values(mcpServers).map(serverConfig => 
+      callSpecificMCPServer(serverConfig, 'tools/list')
+    );
+
+    const results = await Promise.all(toolPromises);
+    const allTools = results.flatMap(result => result.tools || []);
+
+    console.log('✅ All tools listed successfully:', allTools);
     res.json({
       success: true,
-      tools: result.tools || []
+      tools: allTools
     });
   } catch (error) {
-    console.error('❌ Error listing tools:', error);
+    console.error('❌ Error listing all tools:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -151,14 +134,25 @@ app.get('/api/mcp/tools', async (req, res) => {
   }
 });
 
-// API 端點：調用工具
+// API endpoint to call a tool
 app.post('/api/mcp/tools/call', async (req, res) => {
   try {
     const { name, arguments: args } = req.body;
-    
     console.log(`📡 POST /api/mcp/tools/call - Calling tool: ${name}`, args);
-    
-    const result = await callMCPServer('tools/call', {
+
+    let serverConfig = null;
+    for (const key in mcpServers) {
+      if (mcpServers[key].tools.includes(name)) {
+        serverConfig = mcpServers[key];
+        break;
+      }
+    }
+
+    if (!serverConfig) {
+      throw new Error(`Tool "${name}" not found in any MCP server.`);
+    }
+
+    const result = await callSpecificMCPServer(serverConfig, 'tools/call', {
       name: name,
       arguments: args || {}
     });
@@ -177,7 +171,7 @@ app.post('/api/mcp/tools/call', async (req, res) => {
   }
 });
 
-// 健康檢查端點
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',

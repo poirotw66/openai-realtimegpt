@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "grounding-search": {
+      "command": "/Users/cfh00896102/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/cfh00896102/Github/openai-realtimegpt/grounding-mcp",
+        "python",
+        "grounding_mcp/server.py"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "AIzaSyC5lKSpC33Bm1lJmMFuaSfA_0viHJqiWek"
+      }
+    },
+    "m365-rag-agent": {
+      "command": "/Users/cfh00896102/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/cfh00896102/Github/m365_rag_agent/mcp_rag_server",
+        "python",
+        "server.py"
+      ],
+      "env": {
+        "GOOGLE_API_KEY": "AIzaSyC5lKSpC33Bm1lJmMFuaSfA_0viHJqiWek"
+      }
+    }
+  }
+}

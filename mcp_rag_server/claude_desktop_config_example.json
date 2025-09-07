@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "m365-rag-agent": {
+      "command": "python3",
+      "args": ["/Users/cfh00896102/Github/m365_rag_agent/mcp_rag_server/server.py"],
+      "env": {
+        "GOOGLE_API_KEY": "AIzaSyC5lKSpC33Bm1lJmMFuaSfA_0viHJqiWek"
+      }
+    }
+  }
+}
