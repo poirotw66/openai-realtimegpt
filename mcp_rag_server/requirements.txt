@@ -1,0 +1,9 @@
+mcp
+python-dotenv
+langchain-google-genai
+langchain-community
+pandas
+chromadb
+openpyxl
+pyyaml
+tqdm
