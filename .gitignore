@@ -47,3 +47,9 @@ Thumbs.db
 *__init__.py
 *__init__
 *__init__.cpython-313.pyc
+.chrome_db_all_V2/
+*.chroma_db_all_V2/
+*.zip
+*.sqlite3
+*.bin
+*.chroma.sqlite3
