@@ -41,10 +41,11 @@ async function createAgentWithTools() {
     instructions: 'You are a helpful assistant. Always respond in the same language as the user. 如果用戶說中文，請用中文回答。You have access to tools including get_current_time for time queries and grounded_search for web searches and current information.',
     tools: allTools
   });
-
-  // Create session
+// gpt-4o-realtime-preview-2025-06-03 gpt-4o-mini-realtime-preview=gpt-4o-mini-realtime-preview-2024-12-17
+// gpt-realtime-2025-08-28
+// Create session
   session = new RealtimeSession(agent, {
-    model: 'gpt-4o-mini-realtime-preview',
+    model: 'gpt-4o-realtime-preview-2025-06-03',
   });
 
   return { agent, session };
