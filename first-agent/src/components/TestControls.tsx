@@ -3,9 +3,10 @@ import React from 'react';
 interface TestControlsProps {
   testAIResponse: () => void;
   testVoiceRecognition: () => void;
+  debugSessionHistory?: () => void;
 }
 
-const TestControls: React.FC<TestControlsProps> = ({ testAIResponse, testVoiceRecognition }) => {
+const TestControls: React.FC<TestControlsProps> = ({ testAIResponse, testVoiceRecognition, debugSessionHistory }) => {
   return (
     <div style={{ marginTop: '15px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
       <button
@@ -35,6 +36,22 @@ const TestControls: React.FC<TestControlsProps> = ({ testAIResponse, testVoiceRe
       >
         🎤 測試語音識別
       </button>
+
+      {debugSessionHistory && (
+        <button
+          onClick={debugSessionHistory}
+          style={{
+            backgroundColor: '#E91E63',
+            color: 'white',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '5px',
+            cursor: 'pointer'
+          }}
+        >
+          🔍 調試會話歷史
+        </button>
+      )}
 
       <button
         onClick={() => (window as any).sendTestMessage?.()}

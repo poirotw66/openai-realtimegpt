@@ -3,8 +3,6 @@ import './App.css';
 import { connectSession, disconnectSession, pauseSession, getSupportsPause, setMessageCallback, sendAudioFromFile, flushUserMessagesFromSession } from './agent';
 import ConnectionView from './components/ConnectionView';
 import ConversationView from './components/ConversationView';
-import DebugPanel from './components/DebugPanel';
-import TestControls from './components/TestControls';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -21,21 +19,13 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [supportsPause, setSupportsPause] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<string[]>([]);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [testAudioSending, setTestAudioSending] = useState(false);
   const testAudioInputRef = useRef<HTMLInputElement>(null);
-
-  const addDebugInfo = (info: string) => {
-    console.log('Debug:', info);
-    setDebugInfo(prev => [...prev.slice(-9), `${new Date().toLocaleTimeString()}: ${info}`]);
-  };
 
   useEffect(() => {
     setMessageCallback((message: Message, messageId?: string) => {
       // Hide initial greeting trigger (single dot sent to make model say hello)
       if (message.role === 'user' && message.content.trim() === '.') return;
-      console.log('Message received:', message, 'ID:', messageId);
       
       setMessages(prev => {
         if (messageId && message.isStreaming) {
@@ -63,7 +53,6 @@ function App() {
         }
       });
       
-      addDebugInfo(`新消息: ${message.role} - ${message.content.substring(0, 50)}... (${message.isStreaming ? '流式中' : '完成'})`);
     });
   }, []);
 
@@ -72,13 +61,11 @@ function App() {
       if (!hasEnteredConversation) {
         setMessages([]);
       }
-      addDebugInfo('開始連接（從後端取得 token）...');
       
       await connectSession();
       setIsConnected(true);
       setIsListening(true);
       setHasEnteredConversation(true);
-      addDebugInfo('連接成功！');
       
       setMessages((prev) => {
         if (prev.length === 0) {
@@ -93,11 +80,6 @@ function App() {
       
     } catch (error) {
       console.error('Connection error:', error);
-      if (error instanceof Error) {
-        addDebugInfo(`連接錯誤: ${error.message}`);
-      } else {
-        addDebugInfo(`連接錯誤: ${String(error)}`);
-      }
       alert('Failed to connect. Ensure MCP proxy is running (npm run dev-full) and OPENAI_API_KEY is set in .env');
     }
   };
@@ -108,7 +90,6 @@ function App() {
     setIsListening(false);
     setIsPaused(false);
     setSupportsPause(false);
-    addDebugInfo('已掛斷');
   };
 
   const handlePauseToggle = () => {
@@ -116,7 +97,6 @@ function App() {
     const nextPaused = !isPaused;
     pauseSession(nextPaused);
     setIsPaused(nextPaused);
-    addDebugInfo(nextPaused ? '已暫停' : '已繼續');
   };
 
   const handleSendTestAudio = async () => {
@@ -127,20 +107,22 @@ function App() {
     }
     try {
       setTestAudioSending(true);
-      addDebugInfo(`傳送測試音檔: ${file.name}`);
       await sendAudioFromFile(file);
-      addDebugInfo('測試音檔已傳送，等待 AI 回覆…');
-      // Flush user message from session history so test-audio transcript appears in conversation (transcription is async)
-      flushUserMessagesFromSession();
-      [600, 1200, 2400, 4000].forEach((ms) => setTimeout(flushUserMessagesFromSession, ms));
+      
+      // Simple retry mechanism for transcription
+      setTimeout(() => flushUserMessagesFromSession(), 1000);
+      setTimeout(() => flushUserMessagesFromSession(), 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      addDebugInfo(`傳送失敗: ${msg}`);
       alert(`傳送失敗: ${msg}`);
     } finally {
       setTestAudioSending(false);
       if (testAudioInputRef.current) testAudioInputRef.current.value = '';
     }
+  };
+
+  const debugSessionHistory = () => {
+    flushUserMessagesFromSession();
   };
 
   const testAIResponse = () => {
@@ -159,16 +141,11 @@ function App() {
       content: randomResponse,
       timestamp: new Date()
     }]);
-    
-    addDebugInfo(`測試 AI 回應: ${randomResponse}`);
   };
 
   const testVoiceRecognition = async () => {
-    addDebugInfo('開始手動語音測試...');
-    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      addDebugInfo('✅ 麥克風權限已獲得');
       
       if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
@@ -180,7 +157,6 @@ function App() {
         
         recognition.onresult = (event: any) => {
           const transcript = event.results[event.results.length - 1][0].transcript;
-          addDebugInfo(`語音識別結果: ${transcript}`);
           setMessages(prev => [...prev, {
             role: 'user',
             content: transcript,
@@ -188,26 +164,18 @@ function App() {
           }]);
         };
         
-        recognition.onerror = (event: any) => {
-          addDebugInfo(`語音識別錯誤: ${event.error}`);
-        };
-        
         recognition.start();
-        addDebugInfo('✅ 瀏覽器語音識別已啟動');
         
         setTimeout(() => {
           recognition.stop();
-          addDebugInfo('語音識別已停止');
         }, 10000);
         
-      } else {
-        addDebugInfo('❌ 瀏覽器不支持語音識別');
       }
       
       stream.getTracks().forEach(track => track.stop());
       
     } catch (error) {
-      addDebugInfo(`麥克風測試失敗: ${error}`);
+      console.error('Voice test failed:', error);
     }
   };
 
@@ -270,24 +238,6 @@ function App() {
               </button>
             </div>
             <ConversationView messages={messages} />
-            <div className="debug-section">
-              <button
-                type="button"
-                className="btn-toggle-debug"
-                onClick={() => setShowDebugPanel((v) => !v)}
-              >
-                {showDebugPanel ? '▼ 收合開發者工具' : '▶ 展開開發者工具'}
-              </button>
-              {showDebugPanel && (
-                <>
-                  <TestControls
-                    testAIResponse={testAIResponse}
-                    testVoiceRecognition={testVoiceRecognition}
-                  />
-                  <DebugPanel debugInfo={debugInfo} />
-                </>
-              )}
-            </div>
           </div>
         )}
       </div>
