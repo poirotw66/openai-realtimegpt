@@ -20,24 +20,22 @@ const ConversationView: React.FC<ConversationViewProps> = ({ messages }) => {
   }, [messages]);
 
   return (
-    <div className="conversation-container">
-      <h3 className="conversation-title">💬 即時對話（您說的話與 AI 回覆）</h3>
-
+    <div className="conversation-container" style={{ height: '100%', maxHeight: 'none', border: 'none', boxShadow: 'none', background: 'transparent' }}>
       {messages.length === 0 ? (
-        <div className="conversation-empty">
-          開始對麥克風說話，您說的話與 AI 的回覆會即時顯示在這裡。
+        <div className="conversation-empty" style={{ padding: '4rem 2rem', fontSize: '1.1rem' }}>
+          開始對麥克風說話，您的語音和 AI 的回覆會即時顯示在這裡。
         </div>
       ) : (
         <div>
           {messages.map((message, index) => (
-            <div key={message.messageId || index} className={`message ${message.role}`}>
+            <div key={message.messageId || index} className={`message ${message.role} ${message.isStreaming ? 'streaming' : ''}`}>
               <div className={`message-header ${message.role}`}>
                 {message.role === 'user' ? '🎤 您說' : '🤖 AI 回答'}
                 {message.isStreaming && (
                   <span className="streaming-indicator">⚡ 即時中...</span>
                 )}
                 <span className="timestamp">
-                  {message.timestamp.toLocaleTimeString()}
+                  {message.timestamp.toLocaleTimeString('zh-TW')}
                 </span>
               </div>
               <div className="message-content" style={{
@@ -62,12 +60,13 @@ const ConversationView: React.FC<ConversationViewProps> = ({ messages }) => {
               </div>
             </div>
           ))}
-
-          <div className="conversation-count">
-            共 {messages.length} 條訊息
-          </div>
-
           <div ref={messagesEndRef} />
+        </div>
+      )}
+      
+      {messages.length > 0 && (
+        <div className="conversation-count">
+          共 {messages.length} 則對話
         </div>
       )}
     </div>
