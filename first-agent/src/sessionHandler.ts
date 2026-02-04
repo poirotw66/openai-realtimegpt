@@ -72,7 +72,8 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
             case 'conversation.item.input_audio_transcription.delta':
                 if (event.delta) {
                     currentUserMessage += event.delta;
-                    if (!userMessageId) userMessageId = `user-${Date.now()}`;
+                    const itemId = (event as any).item_id ?? '';
+                    if (!userMessageId) userMessageId = itemId ? `user-${itemId}` : `user-${Date.now()}`;
                     messageCallback({
                         role: 'user',
                         content: currentUserMessage,
@@ -84,8 +85,28 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
             case 'conversation.item.input_audio_transcription.completed': {
                 const transcript = (event as any).transcript ?? event.text ?? currentUserMessage;
                 const itemId = (event as any).item_id ?? event.item_id ?? '';
-                if (transcript && String(transcript).trim()) {
-                    pushUserMessageOnce(userItemIdsSent, messageCallback, String(transcript).trim(), itemId);
+                if (transcript && String(transcript).trim() && !userItemIdsSent.has(itemId)) {
+                    if (itemId) userItemIdsSent.add(itemId);
+                    // If we have a streaming message, update it to final
+                    if (userMessageId && messageCallback) {
+                        messageCallback({
+                            role: 'user',
+                            content: String(transcript).trim(),
+                            timestamp: new Date(),
+                            isStreaming: false
+                        }, userMessageId);
+                    } else {
+                        // Create new message if no streaming message exists
+                        const messageId = itemId ? `user-${itemId}` : `user-${Date.now()}`;
+                        if (messageCallback) {
+                            messageCallback({
+                                role: 'user',
+                                content: String(transcript).trim(),
+                                timestamp: new Date(),
+                                isStreaming: false
+                            }, messageId);
+                        }
+                    }
                 }
                 currentUserMessage = '';
                 userMessageId = '';
