@@ -178,42 +178,11 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
         }
     }
 
+    // Only use history_updated for fallback, avoid duplicate listeners
     session.on('history_updated', (history: unknown) => {
         const list = Array.isArray(history) ? (history as ConversationItemLike[]) : (sessionAny.history ? (sessionAny.history as ConversationItemLike[]) : []);
         pushUserMessagesFromHistory(list);
     });
-
-    session.on('history_added', (item: unknown) => {
-        const historyItem = item as ConversationItemLike;
-        if (historyItem?.role !== 'user') return;
-        const itemId = getItemId(historyItem);
-        const text = getUserMessageTextFromItem(historyItem);
-        if (text && itemId) pushUserMessageOnce(userItemIdsSent, messageCallback, text, itemId);
-    });
-
-    // Direct transport listeners (base emits by event type); ensures we get user transcription even if transport_event payload differs
-    const transport = sessionAny.transport;
-    if (transport && typeof transport.on === 'function') {
-        transport.on('conversation.item.input_audio_transcription.completed', (event: { transcript?: string; item_id?: string }) => {
-            const transcript = event?.transcript ?? (event as any).transcript;
-            const itemId = event?.item_id ?? (event as any).item_id ?? '';
-            if (transcript && String(transcript).trim()) {
-                pushUserMessageOnce(userItemIdsSent, messageCallback, String(transcript).trim(), itemId);
-            }
-        });
-        
-        transport.on('conversation.item.retrieved', (event: { item?: ConversationItemLike }) => {
-            const item = event?.item ?? (event as any).item;
-            if (!item || item.role !== 'user') return;
-            const itemId = getItemId(item);
-            const text = getUserMessageTextFromItem(item);
-            if (text && itemId) pushUserMessageOnce(userItemIdsSent, messageCallback, text, itemId);
-        });
-    }
-
-    // Do NOT also push from agent_end: we already get final text from
-    // response.output_text.done or response.output_audio_transcript.done.
-    // Pushing from both causes the same AI reply to appear twice in the UI.
 
     /** Flush user messages from current session history (call after e.g. sendAudioFromFile so test-audio transcript appears). */
     function flushUserMessagesFromHistory() {
@@ -221,6 +190,6 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
         if (Array.isArray(history)) pushUserMessagesFromHistory(history as ConversationItemLike[]);
     }
 
-    console.log('✅ Event handlers registered (transport_event, history_updated, history_added).');
+    console.log('✅ Event handlers registered (transport_event, history_updated).');
     return flushUserMessagesFromHistory;
 }

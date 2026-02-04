@@ -28,31 +28,33 @@ function App() {
       if (message.role === 'user' && message.content.trim() === '.') return;
       
       setMessages(prev => {
-        if (messageId && message.isStreaming) {
-          const existingIndex = prev.findIndex(m => m.messageId === messageId);
+        const id = messageId || `${message.role}-${Date.now()}`;
+        
+        // For streaming messages, update existing or add new
+        if (message.isStreaming) {
+          const existingIndex = prev.findIndex(m => m.messageId === id);
           if (existingIndex !== -1) {
             const newMessages = [...prev];
-            newMessages[existingIndex] = { ...message, messageId };
+            newMessages[existingIndex] = { ...message, messageId: id };
             return newMessages;
           } else {
-            return [...prev, { ...message, messageId }];
+            return [...prev, { ...message, messageId: id }];
           }
-        } else {
-          const finalMessage = { ...message, messageId: messageId || `${message.role}-${Date.now()}`, isStreaming: false };
-          
-          if (messageId) {
-            const existingIndex = prev.findIndex(m => m.messageId === messageId);
-            if (existingIndex !== -1) {
-              const newMessages = [...prev];
-              newMessages[existingIndex] = finalMessage;
-              return newMessages;
-            }
+        } 
+        // For final messages, always update existing or add new
+        else {
+          const existingIndex = prev.findIndex(m => m.messageId === id);
+          if (existingIndex !== -1) {
+            // Update existing message with final content
+            const newMessages = [...prev];
+            newMessages[existingIndex] = { ...message, messageId: id, isStreaming: false };
+            return newMessages;
+          } else {
+            // Add new final message only if no existing message with same ID
+            return [...prev, { ...message, messageId: id, isStreaming: false }];
           }
-          
-          return [...prev, finalMessage];
         }
       });
-      
     });
   }, []);
 
