@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { connectSession, disconnectSession, pauseSession, getSupportsPause, setMessageCallback, sendAudioFromFile, flushUserMessagesFromSession } from './agent';
-import ConnectionView from './components/ConnectionView';
+import WelcomePage from './components/WelcomePage';
+import ModelSelection from './components/ModelSelection';
 import ConversationView from './components/ConversationView';
 
 interface Message {
@@ -12,14 +13,19 @@ interface Message {
   messageId?: string;
 }
 
+type AppView = 'welcome' | 'model-selection' | 'connecting' | 'chat';
+type SelectedModel = 'gpt-realtime' | 'gemini-live' | null;
+
 function App() {
+  const [currentView, setCurrentView] = useState<AppView>('welcome');
+  const [selectedModel, setSelectedModel] = useState<SelectedModel>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [hasEnteredConversation, setHasEnteredConversation] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [supportsPause, setSupportsPause] = useState(false);
   const [testAudioSending, setTestAudioSending] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const testAudioInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -58,31 +64,53 @@ function App() {
     });
   }, []);
 
+  const handleStartChat = () => {
+    setCurrentView('model-selection');
+  };
+
+  const handleSelectModel = (model: 'gpt-realtime' | 'gemini-live') => {
+    if (model === 'gemini-live') {
+      alert('Gemini Live 功能即將推出，請選擇 GPT Realtime');
+      return;
+    }
+    
+    setSelectedModel(model);
+    setCurrentView('connecting');
+    handleConnect();
+  };
+
+  const handleBackToWelcome = () => {
+    setCurrentView('welcome');
+    setSelectedModel(null);
+  };
+
+  const handleBackToModelSelection = () => {
+    setCurrentView('model-selection');
+    handleDisconnect();
+  };
+
   const handleConnect = async () => {
     try {
-      if (!hasEnteredConversation) {
-        setMessages([]);
-      }
+      setIsConnecting(true);
+      setMessages([]);
       
       await connectSession();
       setIsConnected(true);
       setIsListening(true);
-      setHasEnteredConversation(true);
+      setCurrentView('chat');
       
-      setMessages((prev) => {
-        if (prev.length === 0) {
-          return [{
-            role: 'assistant',
-            content: '🔗 已連接到語音助手！請開始說話...',
-            timestamp: new Date()
-          }];
-        }
-        return prev;
-      });
+      setMessages([{
+        role: 'assistant',
+        content: '🔗 已連接到 GPT Realtime！請開始說話...',
+        timestamp: new Date()
+      }]);
       
     } catch (error) {
       console.error('Connection error:', error);
-      alert('Failed to connect. Ensure MCP proxy is running (npm run dev-full) and OPENAI_API_KEY is set in .env');
+      alert('連接失敗。請確保 MCP proxy 正在運行 (npm run dev-full) 且 .env 中已設定 OPENAI_API_KEY');
+      setCurrentView('model-selection');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -92,6 +120,7 @@ function App() {
     setIsListening(false);
     setIsPaused(false);
     setSupportsPause(false);
+    setCurrentView('model-selection');
   };
 
   const handlePauseToggle = () => {
@@ -181,73 +210,103 @@ function App() {
     }
   };
 
-  return (
-    <>
-      <h1>OpenAI Realtime Agent</h1>
+  const renderCurrentView = () => {
+    switch (currentView) {
+      case 'welcome':
+        return <WelcomePage onStartChat={handleStartChat} />;
       
-      <div className="card">
-        {!hasEnteredConversation ? (
-          <ConnectionView handleConnect={handleConnect} />
-        ) : (
-          <div className="connected-view">
-            <div className="connection-bar">
-              <div className="listening-indicator">
-                <div className={`status-dot ${isListening ? 'listening' : ''}`} />
-                <span className={isListening ? 'listening-text' : ''}>
-                  {isConnected ? (isPaused ? '⏸ 已暫停' : isListening ? '🎤 聆聽中…' : '🔇 未聆聽') : '已掛斷'}
-                </span>
+      case 'model-selection':
+        return (
+          <ModelSelection 
+            onSelectModel={handleSelectModel} 
+            onBack={handleBackToWelcome}
+          />
+        );
+      
+      case 'connecting':
+        return (
+          <div className="connecting-view">
+            <div className="connecting-container">
+              <div className="loading-spinner"></div>
+              <h2>連接中...</h2>
+              <p>正在建立與 {selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live'} 的連接</p>
+            </div>
+          </div>
+        );
+      
+      case 'chat':
+        return (
+          <div className="chat-view">
+            <div className="chat-header">
+              <button className="back-btn" onClick={handleBackToModelSelection}>
+                ← 選擇其他模型
+              </button>
+              <div className="chat-title">
+                <span className="model-name">{selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live'}</span>
+                <div className="connection-status">
+                  <div className={`status-dot ${isListening ? 'listening' : ''}`} />
+                  <span className={isListening ? 'listening-text' : ''}>
+                    {isConnected ? (isPaused ? '⏸ 已暫停' : isListening ? '🎤 聆聽中…' : '🔇 未聆聽') : '已掛斷'}
+                  </span>
+                </div>
               </div>
-              {isConnected ? (
-                <>
-                  {supportsPause && (
-                    <button type="button" className="btn-pause" onClick={handlePauseToggle}>
-                      {isPaused ? '繼續' : '暫停'}
-                    </button>
-                  )}
+              <div className="chat-controls">
+                {isConnected && supportsPause && (
+                  <button type="button" className="btn-pause" onClick={handlePauseToggle}>
+                    {isPaused ? '繼續' : '暫停'}
+                  </button>
+                )}
+                {isConnected && (
                   <button type="button" className="btn-disconnect" onClick={handleDisconnect}>
                     掛斷
                   </button>
-                </>
-              ) : (
-                <button type="button" className="btn-connect" onClick={handleConnect}>
-                  開始連線
-                </button>
-              )}
+                )}
+              </div>
             </div>
-            <p className="connected-hint">
-              {isConnected
-                ? '可直接對麥克風說話，或使用下方「測試音檔」上傳音檔模擬語音輸入。'
-                : '點「開始連線」重新連接，對話記錄會保留。'}
-            </p>
-            <div className="test-audio-section" style={{ opacity: isConnected ? 1 : 0.6 }}>
-              <label className="test-audio-label">
-                <span>使用測試音檔：</span>
-                <input
-                  ref={testAudioInputRef}
-                  type="file"
-                  accept="audio/*"
-                  className="test-audio-input"
+            
+            <div className="chat-content">
+              <ConversationView messages={messages} />
+            </div>
+            
+            <div className="chat-footer">
+              <div className="test-audio-section">
+                <label className="test-audio-label">
+                  <span>測試音檔：</span>
+                  <input
+                    ref={testAudioInputRef}
+                    type="file"
+                    accept="audio/*"
+                    className="test-audio-input"
+                    disabled={testAudioSending || !isConnected}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn-send-test-audio"
+                  onClick={handleSendTestAudio}
                   disabled={testAudioSending || !isConnected}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn-send-test-audio"
-                onClick={handleSendTestAudio}
-                disabled={testAudioSending || !isConnected}
-              >
-                {testAudioSending ? '傳送中…' : '傳送測試音檔'}
-              </button>
+                >
+                  {testAudioSending ? '傳送中…' : '傳送'}
+                </button>
+              </div>
+              <p className="chat-hint">
+                {isConnected
+                  ? '可直接對麥克風說話，或使用上方「測試音檔」上傳音檔。'
+                  : '連接已中斷'}
+              </p>
             </div>
-            <ConversationView messages={messages} />
           </div>
-        )}
-      </div>
+        );
       
-      <p className="read-the-docs">
-        點「Connect to Voice Assistant」開始連線；連線後可直接說話，可點「暫停」暫停收發語音（再點「繼續」恢復），或點「掛斷」結束連線。
-      </p>
-    </>
+      default:
+        return <WelcomePage onStartChat={handleStartChat} />;
+    }
+  };
+
+  return (
+    <div className="app">
+      {renderCurrentView()}
+    </div>
   );
 }
 
