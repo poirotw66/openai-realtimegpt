@@ -68,10 +68,8 @@ When the conversation starts (right after the user connects, before they have sa
   session = new RealtimeSession(agent, {
     model: REALTIME_MODEL,
     config: {
-      audio: {
-        input: {
-          transcription: { language: DISPLAY_LANGUAGE === 'zh-TW' ? 'zh-TW' : 'en' }
-        }
+      input_audio_transcription: {
+        model: 'whisper-1'
       }
     }
   });
@@ -126,13 +124,29 @@ export async function connectSession(apiKey?: string) {
       apiKey: token,
     });
     
+    // After connection, explicitly enable input audio transcription
+    const sessionAny = session as any;
+    if (sessionAny.updateSession) {
+      try {
+        await sessionAny.updateSession({
+          input_audio_transcription: {
+            model: 'whisper-1'
+          }
+        });
+      } catch (error) {
+        // Ignore errors, transcription might already be enabled
+      }
+    }
+    
     console.log('Successfully connected to RealtimeSession');
+
+    // Expose session for debugging
+    (window as any).debugSession = session;
 
     // Setup event handlers
     flushUserMessagesFromSessionHistory = setupEventHandlers(session, messageCallback);
 
     // Trigger initial greeting: send a minimal message so the model says "Hello~ What can I help you?"
-    const sessionAny = session as { sendMessage?: (msg: string) => void };
     if (typeof sessionAny.sendMessage === 'function') {
       setTimeout(() => {
         try {
@@ -210,10 +224,14 @@ export async function sendAudioFromFile(file: File): Promise<void> {
   if (!currentSession) {
     throw new Error('Not connected. Connect first before sending test audio.');
   }
-  const sessionAny = currentSession as { sendAudio: (audio: ArrayBuffer, options?: { commit?: boolean }) => void };
+  const sessionAny = currentSession as { 
+    sendAudio: (audio: ArrayBuffer, options?: { commit?: boolean }) => void;
+    history?: any[];
+  };
   if (typeof sessionAny.sendAudio !== 'function') {
     throw new Error('Session does not support sendAudio');
   }
+  
   const pcmBuffer = await fileToPcm24k(file);
   const bytes = new Uint8Array(pcmBuffer);
   let offset = 0;

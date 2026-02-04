@@ -201,25 +201,13 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                 pushUserMessageOnce(userItemIdsSent, messageCallback, String(transcript).trim(), itemId);
             }
         });
+        
         transport.on('conversation.item.retrieved', (event: { item?: ConversationItemLike }) => {
             const item = event?.item ?? (event as any).item;
             if (!item || item.role !== 'user') return;
             const itemId = getItemId(item);
             const text = getUserMessageTextFromItem(item);
             if (text && itemId) pushUserMessageOnce(userItemIdsSent, messageCallback, text, itemId);
-        });
-        // When audio is committed (e.g. test file upload), transcription may arrive later; poll history to catch user message
-        transport.on('input_audio_buffer.committed', () => {
-            let attempts = 0;
-            const maxAttempts = 35;
-            const intervalMs = 400;
-            const poll = () => {
-                attempts += 1;
-                const history = sessionAny.history;
-                if (Array.isArray(history)) pushUserMessagesFromHistory(history as ConversationItemLike[]);
-                if (attempts < maxAttempts) setTimeout(poll, intervalMs);
-            };
-            setTimeout(poll, 300);
         });
     }
 
