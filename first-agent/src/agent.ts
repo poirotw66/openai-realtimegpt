@@ -4,6 +4,23 @@ import { setMessageCallbackForTools } from './tools/getCurrentTime';
 import { groundingMCPServer } from './mcp/mcpServer';
 import { setupEventHandlers } from './sessionHandler';
 import { setupDebugTools } from './debug';
+import { fileToPcm24k } from './audioUtils';
+
+/** Realtime model used for session and client_secret */
+const REALTIME_MODEL = 'gpt-realtime-mini-2025-12-15';
+
+/**
+ * Display language for conversation: AI replies and (optionally) user transcription.
+ * - 'zh-TW': 繁體中文
+ * - 'en': English
+ */
+export const DISPLAY_LANGUAGE = 'zh-TW' as const;
+type DisplayLanguage = 'zh-TW' | 'en';
+
+const LANGUAGE_INSTRUCTIONS: Record<DisplayLanguage, string> = {
+  'zh-TW': 'You MUST respond only in Traditional Chinese (繁體中文). Do not use Simplified Chinese.',
+  en: 'You MUST respond only in English. Do not use Chinese or other languages.',
+};
 
 // Global variables for agent and session
 let agent: RealtimeAgent | null = null;
@@ -35,17 +52,28 @@ async function createAgentWithTools() {
   console.log('🔧 Total tools available:', allTools.length);
   console.log('🔧 Tool names:', allTools.map((t: any) => t.name));
   
-  // Create agent with all tools
+  // Create agent with all tools (language is set by DISPLAY_LANGUAGE)
+  const langInstructions = LANGUAGE_INSTRUCTIONS[DISPLAY_LANGUAGE];
+  const greeting = DISPLAY_LANGUAGE === 'zh-TW'
+    ? '哈囉～有什麼可以幫你的？'
+    : 'Hello~ What can I help you?';
+
   agent = new RealtimeAgent({
     name: 'Assistant',
-    instructions: 'You are a helpful assistant. Always respond in the same language as the user. 如果用戶說中文，請用中文回答。You have access to tools including get_current_time for time queries and grounded_search for web searches and current information.',
+    instructions: `You are a helpful assistant. ${langInstructions} You have access to tools including get_current_time for time queries and grounded_search for web searches and current information.
+
+When the conversation starts (right after the user connects, before they have said anything), greet them first by saying: "${greeting}" Then wait for their response.`,
     tools: allTools
   });
-// gpt-4o-realtime-preview-2025-06-03 gpt-4o-mini-realtime-preview=gpt-4o-mini-realtime-preview-2024-12-17
-// gpt-realtime-2025-08-28
-// Create session
   session = new RealtimeSession(agent, {
-    model: 'gpt-4o-realtime-preview-2025-06-03',
+    model: REALTIME_MODEL,
+    config: {
+      audio: {
+        input: {
+          transcription: { language: DISPLAY_LANGUAGE === 'zh-TW' ? 'zh-TW' : 'en' }
+        }
+      }
+    }
   });
 
   return { agent, session };
@@ -54,16 +82,38 @@ async function createAgentWithTools() {
 // Store the message callback function
 let messageCallback: ((message: { role: 'user' | 'assistant'; content: string; timestamp: Date; isStreaming?: boolean }, messageId?: string) => void) | null = null;
 
+// Flush user messages from session history (set by setupEventHandlers; call after sendAudioFromFile so test-audio transcript appears)
+let flushUserMessagesFromSessionHistory: (() => void) | null = null;
+
 // Function to set the message callback
 export function setMessageCallback(callback: (message: { role: 'user' | 'assistant'; content: string; timestamp: Date; isStreaming?: boolean }, messageId?: string) => void) {
   messageCallback = callback;
   setMessageCallbackForTools(callback);
 }
 
-// Function to connect to the session
-export async function connectSession(apiKey: string) {
+const REALTIME_PROXY_URL = 'http://localhost:3001';
+
+/** Fetch ephemeral client secret from backend (uses OPENAI_API_KEY from server .env) */
+async function fetchClientSecret(): Promise<string> {
+  const res = await fetch(`${REALTIME_PROXY_URL}/api/realtime/client_secret`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session: { type: 'realtime', model: REALTIME_MODEL }
+    })
+  });
+  const data = await res.json();
+  if (!data.success || !data.value) {
+    throw new Error(data.error || 'Failed to get client secret from server');
+  }
+  return data.value;
+}
+
+// Function to connect to the session (apiKey optional: if omitted, backend provides ephemeral token)
+export async function connectSession(apiKey?: string) {
   try {
-    console.log('Attempting to connect with API key:', apiKey.substring(0, 20) + '...');
+    const token = apiKey ?? await fetchClientSecret();
+    console.log('Attempting to connect with', apiKey ? 'provided API key' : 'ephemeral token from server');
     
     // Create agent and session with all tools (including MCP tools)
     const { agent: newAgent, session: newSession } = await createAgentWithTools();
@@ -71,15 +121,27 @@ export async function connectSession(apiKey: string) {
     session = newSession;
     
     // Automatically connects your microphone and audio output
-    // in the browser via WebRTC.
+    // in the browser via WebRTC. Use ephemeral token or API key.
     await session.connect({
-      apiKey: apiKey,
+      apiKey: token,
     });
     
     console.log('Successfully connected to RealtimeSession');
 
     // Setup event handlers
-    setupEventHandlers(session, messageCallback);
+    flushUserMessagesFromSessionHistory = setupEventHandlers(session, messageCallback);
+
+    // Trigger initial greeting: send a minimal message so the model says "Hello~ What can I help you?"
+    const sessionAny = session as { sendMessage?: (msg: string) => void };
+    if (typeof sessionAny.sendMessage === 'function') {
+      setTimeout(() => {
+        try {
+          sessionAny.sendMessage!('.');
+        } catch (e) {
+          console.warn('Could not send initial greeting trigger:', e);
+        }
+      }, 500);
+    }
 
     // Add manual testing methods in development
     if (import.meta.env && import.meta.env.DEV) {
@@ -99,6 +161,69 @@ export async function cleanupMCPServer() {
     await groundingMCPServer.cleanup();
   } catch (error) {
     console.error('❌ Error during cleanup:', error);
+  }
+}
+
+/** Flush user messages from session history into the UI. Call after sendAudioFromFile so test-audio transcript appears in the conversation. */
+export function flushUserMessagesFromSession(): void {
+  flushUserMessagesFromSessionHistory?.();
+}
+
+/** Disconnect from the session and release resources (Realtime API supports close()). */
+export function disconnectSession(): void {
+  try {
+    flushUserMessagesFromSessionHistory = null;
+    if (session) {
+      const sessionAny = session as { close?: () => void };
+      if (typeof sessionAny.close === 'function') {
+        sessionAny.close();
+        console.log('Disconnected from RealtimeSession');
+      }
+      session = null;
+    }
+    agent = null;
+    cleanupMCPServer();
+  } catch (error) {
+    console.error('❌ Error during disconnect:', error);
+  }
+}
+
+/** Whether the current transport supports pause (mute). WebRTC supports it; WebSocket does not. */
+export function getSupportsPause(): boolean {
+  if (!session) return false;
+  return session.muted !== null;
+}
+
+/** Pause or resume sending microphone input. Only supported when using WebRTC transport. */
+export function pauseSession(muted: boolean): void {
+  if (session && session.muted !== null) {
+    session.mute(muted);
+  }
+}
+
+/** Chunk size for sending audio (SDK uses spread in base64 conversion; large buffers cause stack overflow). */
+const AUDIO_CHUNK_BYTES = 4800; // ~100ms at 24kHz 16-bit mono
+
+/** Send audio from a file as user input (for testing without microphone). Realtime API expects PCM 16-bit 24kHz mono. */
+export async function sendAudioFromFile(file: File): Promise<void> {
+  const currentSession = session;
+  if (!currentSession) {
+    throw new Error('Not connected. Connect first before sending test audio.');
+  }
+  const sessionAny = currentSession as { sendAudio: (audio: ArrayBuffer, options?: { commit?: boolean }) => void };
+  if (typeof sessionAny.sendAudio !== 'function') {
+    throw new Error('Session does not support sendAudio');
+  }
+  const pcmBuffer = await fileToPcm24k(file);
+  const bytes = new Uint8Array(pcmBuffer);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const end = Math.min(offset + AUDIO_CHUNK_BYTES, bytes.length);
+    const chunkLen = end - offset;
+    const chunkBuf = new ArrayBuffer(chunkLen);
+    new Uint8Array(chunkBuf).set(bytes.subarray(offset, end));
+    sessionAny.sendAudio(chunkBuf, { commit: end >= bytes.length });
+    offset = end;
   }
 }
 

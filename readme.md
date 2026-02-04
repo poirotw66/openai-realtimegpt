@@ -1,22 +1,28 @@
 # 使用方法
 
-##  啟動agent
+## 啟動 agent
+1. 在專案根目錄或 `first-agent` 建立 `.env`，設定 `OPENAI_API_KEY=你的金鑰`。
+2. 啟動：
 ```
 cd first-agent
 npm run dev-full
 ```
+3. 開啟 http://localhost:5173/，點擊「Connect to Voice Assistant」。  
+   前端會透過後端自動用 `.env` 的 `OPENAI_API_KEY` 向 OpenAI 取得 ephemeral token，無需手動 curl。
 
-## Generate a client ephemeral token
+## 手動取得 client ephemeral token（選用）
+若需要自行取得 token 測試，可呼叫後端 API：
+```
+curl -X POST http://localhost:3001/api/realtime/client_secret \
+  -H "Content-Type: application/json" \
+  -d '{"session":{"type":"realtime","model":"gpt-realtime"}}'
+```
+或使用 OpenAI API（需先 `export OPENAI_API_KEY=你的金鑰`）：
 ```
 curl -X POST https://api.openai.com/v1/realtime/client_secrets \
    -H "Authorization: Bearer $OPENAI_API_KEY" \
    -H "Content-Type: application/json" \
-   -d '{
-     "session": {
-       "type": "realtime",
-       "model": "gpt-realtime"
-     }
-   }'
+   -d '{"session":{"type":"realtime","model":"gpt-realtime"}}'
 ```
 
 ## 費用說明

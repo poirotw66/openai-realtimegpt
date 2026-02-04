@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { connectSession, setMessageCallback } from './agent';
+import { connectSession, disconnectSession, pauseSession, getSupportsPause, setMessageCallback, sendAudioFromFile, flushUserMessagesFromSession } from './agent';
 import ConnectionView from './components/ConnectionView';
 import ConversationView from './components/ConversationView';
 import DebugPanel from './components/DebugPanel';
@@ -16,10 +16,15 @@ interface Message {
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const [apiKey, setApiKey] = useState('');
+  const [hasEnteredConversation, setHasEnteredConversation] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isListening, setIsListening] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [supportsPause, setSupportsPause] = useState(false);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [testAudioSending, setTestAudioSending] = useState(false);
+  const testAudioInputRef = useRef<HTMLInputElement>(null);
 
   const addDebugInfo = (info: string) => {
     console.log('Debug:', info);
@@ -28,6 +33,8 @@ function App() {
 
   useEffect(() => {
     setMessageCallback((message: Message, messageId?: string) => {
+      // Hide initial greeting trigger (single dot sent to make model say hello)
+      if (message.role === 'user' && message.content.trim() === '.') return;
       console.log('Message received:', message, 'ID:', messageId);
       
       setMessages(prev => {
@@ -61,25 +68,28 @@ function App() {
   }, []);
 
   const handleConnect = async () => {
-    if (!apiKey) {
-      alert('Please enter your OpenAI API key');
-      return;
-    }
-    
     try {
-      setMessages([]);
-      addDebugInfo('開始連接...');
+      if (!hasEnteredConversation) {
+        setMessages([]);
+      }
+      addDebugInfo('開始連接（從後端取得 token）...');
       
-      await connectSession(apiKey);
+      await connectSession();
       setIsConnected(true);
       setIsListening(true);
+      setHasEnteredConversation(true);
       addDebugInfo('連接成功！');
       
-      setMessages([{
-        role: 'assistant',
-        content: '🔗 已連接到語音助手！請開始說話...',
-        timestamp: new Date()
-      }]);
+      setMessages((prev) => {
+        if (prev.length === 0) {
+          return [{
+            role: 'assistant',
+            content: '🔗 已連接到語音助手！請開始說話...',
+            timestamp: new Date()
+          }];
+        }
+        return prev;
+      });
       
     } catch (error) {
       console.error('Connection error:', error);
@@ -88,7 +98,48 @@ function App() {
       } else {
         addDebugInfo(`連接錯誤: ${String(error)}`);
       }
-      alert('Failed to connect. Please check your API key and try again.');
+      alert('Failed to connect. Ensure MCP proxy is running (npm run dev-full) and OPENAI_API_KEY is set in .env');
+    }
+  };
+
+  const handleDisconnect = () => {
+    disconnectSession();
+    setIsConnected(false);
+    setIsListening(false);
+    setIsPaused(false);
+    setSupportsPause(false);
+    addDebugInfo('已掛斷');
+  };
+
+  const handlePauseToggle = () => {
+    if (!supportsPause) return;
+    const nextPaused = !isPaused;
+    pauseSession(nextPaused);
+    setIsPaused(nextPaused);
+    addDebugInfo(nextPaused ? '已暫停' : '已繼續');
+  };
+
+  const handleSendTestAudio = async () => {
+    const file = testAudioInputRef.current?.files?.[0];
+    if (!file) {
+      alert('請先選擇一個音檔（WAV、MP3 等）');
+      return;
+    }
+    try {
+      setTestAudioSending(true);
+      addDebugInfo(`傳送測試音檔: ${file.name}`);
+      await sendAudioFromFile(file);
+      addDebugInfo('測試音檔已傳送，等待 AI 回覆…');
+      // Flush user message from session history so test-audio transcript appears in conversation (transcription is async)
+      flushUserMessagesFromSession();
+      [600, 1200, 2400, 4000].forEach((ms) => setTimeout(flushUserMessagesFromSession, ms));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addDebugInfo(`傳送失敗: ${msg}`);
+      alert(`傳送失敗: ${msg}`);
+    } finally {
+      setTestAudioSending(false);
+      if (testAudioInputRef.current) testAudioInputRef.current.value = '';
     }
   };
 
@@ -165,39 +216,84 @@ function App() {
       <h1>OpenAI Realtime Agent</h1>
       
       <div className="card">
-        {!isConnected ? (
-          <ConnectionView
-            apiKey={apiKey}
-            setApiKey={setApiKey}
-            handleConnect={handleConnect}
-          />
+        {!hasEnteredConversation ? (
+          <ConnectionView handleConnect={handleConnect} />
         ) : (
-          <div>
-            <h2>🎤 Voice Assistant Connected!</h2>
-            <p>You can now start talking to your assistant.</p>
-            <p>Grant microphone access when prompted.</p>
-            
-            <ConversationView messages={messages} />
-            
-            <div className="listening-indicator">
-              <div className={`status-dot ${isListening ? 'listening' : ''}`}></div>
-              <span style={{ color: isListening ? '#4CAF50' : '#666' }}>
-                {isListening ? '🎤 Listening...' : '🔇 Not listening'}
-              </span>
+          <div className="connected-view">
+            <div className="connection-bar">
+              <div className="listening-indicator">
+                <div className={`status-dot ${isListening ? 'listening' : ''}`} />
+                <span className={isListening ? 'listening-text' : ''}>
+                  {isConnected ? (isPaused ? '⏸ 已暫停' : isListening ? '🎤 聆聽中…' : '🔇 未聆聽') : '已掛斷'}
+                </span>
+              </div>
+              {isConnected ? (
+                <>
+                  {supportsPause && (
+                    <button type="button" className="btn-pause" onClick={handlePauseToggle}>
+                      {isPaused ? '繼續' : '暫停'}
+                    </button>
+                  )}
+                  <button type="button" className="btn-disconnect" onClick={handleDisconnect}>
+                    掛斷
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn-connect" onClick={handleConnect}>
+                  開始連線
+                </button>
+              )}
             </div>
-            
-            <TestControls
-              testAIResponse={testAIResponse}
-              testVoiceRecognition={testVoiceRecognition}
-            />
-            
-            <DebugPanel debugInfo={debugInfo} />
+            <p className="connected-hint">
+              {isConnected
+                ? '可直接對麥克風說話，或使用下方「測試音檔」上傳音檔模擬語音輸入。'
+                : '點「開始連線」重新連接，對話記錄會保留。'}
+            </p>
+            <div className="test-audio-section" style={{ opacity: isConnected ? 1 : 0.6 }}>
+              <label className="test-audio-label">
+                <span>使用測試音檔：</span>
+                <input
+                  ref={testAudioInputRef}
+                  type="file"
+                  accept="audio/*"
+                  className="test-audio-input"
+                  disabled={testAudioSending || !isConnected}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-send-test-audio"
+                onClick={handleSendTestAudio}
+                disabled={testAudioSending || !isConnected}
+              >
+                {testAudioSending ? '傳送中…' : '傳送測試音檔'}
+              </button>
+            </div>
+            <ConversationView messages={messages} />
+            <div className="debug-section">
+              <button
+                type="button"
+                className="btn-toggle-debug"
+                onClick={() => setShowDebugPanel((v) => !v)}
+              >
+                {showDebugPanel ? '▼ 收合開發者工具' : '▶ 展開開發者工具'}
+              </button>
+              {showDebugPanel && (
+                <>
+                  <TestControls
+                    testAIResponse={testAIResponse}
+                    testVoiceRecognition={testVoiceRecognition}
+                  />
+                  <DebugPanel debugInfo={debugInfo} />
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
       
       <p className="read-the-docs">
-        Connect your OpenAI API key and start voice chatting!
+        點「Connect to Voice Assistant」開始連線；連線後可直接說話，可點「暫停」暫停收發語音（再點「繼續」恢復），或點「掛斷」結束連線。
       </p>
     </>
   );
