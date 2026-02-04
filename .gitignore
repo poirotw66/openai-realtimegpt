@@ -53,3 +53,4 @@ Thumbs.db
 *.sqlite3
 *.bin
 *.chroma.sqlite3
+.cursor

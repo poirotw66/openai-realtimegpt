@@ -4,6 +4,7 @@ import { connectSession, disconnectSession, pauseSession, getSupportsPause, setM
 import WelcomePage from './components/WelcomePage';
 import ModelSelection from './components/ModelSelection';
 import ConversationView from './components/ConversationView';
+import ThemeToggle from './components/ThemeToggle';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -213,14 +214,26 @@ function App() {
   const renderCurrentView = () => {
     switch (currentView) {
       case 'welcome':
-        return <WelcomePage onStartChat={handleStartChat} />;
+        return (
+          <div className="welcome-wrapper">
+            <div className="theme-toggle-container">
+              <ThemeToggle />
+            </div>
+            <WelcomePage onStartChat={handleStartChat} />
+          </div>
+        );
       
       case 'model-selection':
         return (
-          <ModelSelection 
-            onSelectModel={handleSelectModel} 
-            onBack={handleBackToWelcome}
-          />
+          <div className="model-selection-wrapper">
+            <div className="theme-toggle-container">
+              <ThemeToggle />
+            </div>
+            <ModelSelection 
+              onSelectModel={handleSelectModel} 
+              onBack={handleBackToWelcome}
+            />
+          </div>
         );
       
       case 'connecting':
@@ -251,6 +264,7 @@ function App() {
                 </div>
               </div>
               <div className="chat-controls">
+                <ThemeToggle />
                 {isConnected && supportsPause && (
                   <button type="button" className="btn-pause" onClick={handlePauseToggle}>
                     {isPaused ? '繼續' : '暫停'}
