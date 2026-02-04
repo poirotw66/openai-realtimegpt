@@ -69,7 +69,11 @@ When the conversation starts (right after the user connects, before they have sa
     model: REALTIME_MODEL,
     config: {
       input_audio_transcription: {
-        model: 'whisper-1'
+        // Use whisper-1 for reliable transcription, then convert with OpenCC
+        model: 'whisper-1',
+        language: 'zh',
+        // Simple prompt for whisper-1
+        prompt: DISPLAY_LANGUAGE === 'zh-TW' ? '繁體中文' : undefined
       }
     }
   });
