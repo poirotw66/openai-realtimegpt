@@ -21,11 +21,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ messages }) => {
 
   return (
     <div className="conversation-container">
-      <h3 style={{ margin: '0 0 15px 0', color: '#4CAF50' }}>💬 即時對話內容</h3>
+      <h3 className="conversation-title">💬 即時對話（您說的話與 AI 回覆）</h3>
 
       {messages.length === 0 ? (
-        <div style={{ fontStyle: 'italic', color: '#666', textAlign: 'center', padding: '20px' }}>
-          開始說話，對話內容會顯示在這裡...
+        <div className="conversation-empty">
+          開始對麥克風說話，您說的話與 AI 的回覆會即時顯示在這裡。
         </div>
       ) : (
         <div>
@@ -63,15 +63,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ messages }) => {
             </div>
           ))}
 
-          <div style={{
-            textAlign: 'center',
-            padding: '10px',
-            fontSize: '0.9em',
-            color: '#666',
-            borderTop: '1px solid #eee',
-            marginTop: '10px'
-          }}>
-            共 {messages.length} 條對話
+          <div className="conversation-count">
+            共 {messages.length} 條訊息
           </div>
 
           <div ref={messagesEndRef} />

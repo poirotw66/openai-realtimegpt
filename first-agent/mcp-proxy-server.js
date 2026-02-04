@@ -2,6 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import { spawn } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Load .env from first-agent or project root
+dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -185,10 +192,63 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Create ephemeral client secret for Realtime API (uses OPENAI_API_KEY from env)
+app.post('/api/realtime/client_secret', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({
+        success: false,
+        error: 'OPENAI_API_KEY is not set. Add it to .env in project root or first-agent.'
+      });
+      return;
+    }
+
+    const body = req.body?.session
+      ? { session: req.body.session }
+      : { session: { type: 'realtime', model: 'gpt-realtime-mini-2025-12-15' } };
+
+    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      res.status(response.status).json({
+        success: false,
+        error: data.error?.message || data.error || 'OpenAI API error'
+      });
+      return;
+    }
+
+    if (!data.value) {
+      res.status(500).json({
+        success: false,
+        error: 'No client secret in OpenAI response'
+      });
+      return;
+    }
+
+    res.json({ success: true, value: data.value, expires_at: data.expires_at });
+  } catch (error) {
+    console.error('❌ Error creating realtime client secret:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create client secret'
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 MCP Proxy Server running on http://localhost:${PORT}`);
   console.log('📡 Available endpoints:');
   console.log('  GET  /api/health - Health check');
+  console.log('  POST /api/realtime/client_secret - Get ephemeral token (uses OPENAI_API_KEY from .env)');
   console.log('  GET  /api/mcp/tools - List available MCP tools');
   console.log('  POST /api/mcp/tools/call - Call MCP tool');
 });

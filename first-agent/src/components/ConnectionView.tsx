@@ -1,22 +1,15 @@
 import React from 'react';
 
 interface ConnectionViewProps {
-  apiKey: string;
-  setApiKey: (key: string) => void;
   handleConnect: () => void;
 }
 
-const ConnectionView: React.FC<ConnectionViewProps> = ({ apiKey, setApiKey, handleConnect }) => {
+const ConnectionView: React.FC<ConnectionViewProps> = ({ handleConnect }) => {
   return (
     <div>
-      <input
-        type="password"
-        placeholder="Enter your OpenAI API key"
-        value={apiKey}
-        onChange={(e) => setApiKey(e.target.value)}
-        style={{ marginBottom: '10px', padding: '5px', width: '300px' }}
-      />
-      <br />
+      <p style={{ marginBottom: '10px', color: '#666' }}>
+        Token is obtained from the server using OPENAI_API_KEY in .env. Ensure <code>npm run dev-full</code> is running.
+      </p>
       <button onClick={handleConnect}>
         Connect to Voice Assistant
       </button>
