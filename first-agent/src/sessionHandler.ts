@@ -1,3 +1,25 @@
+// Chinese S2T conversion - lightweight and browser-compatible
+import { DISPLAY_LANGUAGE } from './agent';
+import { s2t } from 'chinese-s2t';
+
+// Professional conversion function using chinese-s2t
+function convertToTraditional(text: string): string {
+    if (DISPLAY_LANGUAGE !== 'zh-TW' || !text) return text;
+    
+    try {
+        const converted = s2t(text);
+        
+        if (converted !== text) {
+            console.log('🔄 chinese-s2t converted:', text, '→', converted);
+        }
+        
+        return converted;
+    } catch (error) {
+        console.error('Chinese S2T conversion error:', error);
+        return text; // Return original text if conversion fails
+    }
+}
+
 /** Item shape from API (event.item) or SDK history (itemId, content). */
 type ConversationItemLike = {
     id?: string;
@@ -37,7 +59,7 @@ function pushUserMessageOnce(
     if (itemId && userItemIdsSent.has(itemId)) return false;
     if (itemId) userItemIdsSent.add(itemId);
     messageCallback(
-        { role: 'user', content: String(content).trim(), timestamp: new Date(), isStreaming: false },
+        { role: 'user', content: convertToTraditional(String(content).trim()), timestamp: new Date(), isStreaming: false },
         `user-${itemId || Date.now()}`
     );
     return true;
@@ -76,7 +98,7 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                     if (!userMessageId) userMessageId = itemId ? `user-${itemId}` : `user-${Date.now()}`;
                     messageCallback({
                         role: 'user',
-                        content: currentUserMessage,
+                        content: convertToTraditional(currentUserMessage),
                         timestamp: new Date(),
                         isStreaming: true
                     }, userMessageId);
@@ -91,7 +113,7 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                     if (userMessageId && messageCallback) {
                         messageCallback({
                             role: 'user',
-                            content: String(transcript).trim(),
+                            content: convertToTraditional(String(transcript).trim()),
                             timestamp: new Date(),
                             isStreaming: false
                         }, userMessageId);
@@ -101,7 +123,7 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                         if (messageCallback) {
                             messageCallback({
                                 role: 'user',
-                                content: String(transcript).trim(),
+                                content: convertToTraditional(String(transcript).trim()),
                                 timestamp: new Date(),
                                 isStreaming: false
                             }, messageId);
