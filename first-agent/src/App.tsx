@@ -69,7 +69,7 @@ function App() {
     setCurrentView('model-selection');
   };
 
-  const handleSelectModel = (model: 'gpt-realtime' | 'gemini-live') => {
+  const handleSelectModel = (model: 'gpt-realtime' | 'gemini-live', apiKey?: string) => {
     if (model === 'gemini-live') {
       alert('Gemini Live 功能即將推出，請選擇 GPT Realtime');
       return;
@@ -77,7 +77,7 @@ function App() {
     
     setSelectedModel(model);
     setCurrentView('connecting');
-    handleConnect();
+    handleConnect(apiKey);
   };
 
   const handleBackToWelcome = () => {
@@ -90,14 +90,16 @@ function App() {
     handleDisconnect();
   };
 
-  const handleConnect = async () => {
+  const handleConnect = async (apiKey?: string) => {
     try {
       setIsConnecting(true);
       setMessages([]);
       
-      await connectSession();
+      await connectSession(apiKey);
       setIsConnected(true);
       setIsListening(true);
+      setIsPaused(false);
+      setSupportsPause(getSupportsPause());
       setCurrentView('chat');
       
       setMessages([{
@@ -108,7 +110,10 @@ function App() {
       
     } catch (error) {
       console.error('Connection error:', error);
-      alert('連接失敗。請確保 MCP proxy 正在運行 (npm run dev-full) 且 .env 中已設定 OPENAI_API_KEY');
+      const errorMessage = apiKey 
+        ? '連接失敗。請檢查您輸入的 API Key 是否正確。'
+        : '連接失敗。請確保 MCP proxy 正在運行 (npm run dev-full) 且 .env 中已設定 OPENAI_API_KEY，或使用自訂 API Key。';
+      alert(errorMessage);
       setCurrentView('model-selection');
     } finally {
       setIsConnecting(false);
