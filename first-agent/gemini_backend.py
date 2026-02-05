@@ -67,6 +67,7 @@ async def websocket_endpoint(websocket: WebSocket):
     video_input_queue = asyncio.Queue()
     text_input_queue = asyncio.Queue()
     is_processing_file = {"value": False, "timer": None}  # Track if currently processing uploaded file
+    pause_realtime_audio = {"value": False}  # Flag to pause realtime audio during file upload
 
     async def audio_output_callback(data):
         await websocket.send_bytes(data)
@@ -91,9 +92,21 @@ async def websocket_endpoint(websocket: WebSocket):
                             if payload.get("type") == "audio_file":
                                 audio_data = base64.b64decode(payload["data"])
                                 mime_type = payload.get("mime_type", "audio/pcm;rate=16000")
+                                
+                                # Pause realtime audio input during file upload
+                                pause_realtime_audio["value"] = True
+                                
+                                # Clear any queued realtime audio chunks
+                                while not audio_input_queue.empty():
+                                    try:
+                                        audio_input_queue.get_nowait()
+                                    except asyncio.QueueEmpty:
+                                        break
+                                
                                 # Set flag to indicate we're processing an uploaded file
                                 is_processing_file["value"] = True
-                                logger.info("Processing audio file upload")
+                                logger.info("Processing audio file upload (realtime audio paused)")
+                                
                                 # Put the entire audio into text queue so it's sent via session.send() with end_of_turn
                                 await text_input_queue.put({
                                     "audio": audio_data,
@@ -138,9 +151,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     while True:
                         chunk = await audio_input_queue.get()
-                        await session.send_realtime_input(
-                            audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-                        )
+                        # Skip sending if realtime audio is paused (during file upload)
+                        if not pause_realtime_audio["value"]:
+                            await session.send_realtime_input(
+                                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
+                            )
                 except asyncio.CancelledError:
                     pass
 
@@ -162,19 +177,33 @@ async def websocket_endpoint(websocket: WebSocket):
                         if isinstance(text_or_audio, dict) and "audio" in text_or_audio:
                             audio_data = text_or_audio["audio"]
                             mime_type = text_or_audio["mime_type"]
-                            # Send audio as a turn with end_of_turn=True so Gemini waits for complete audio
-                            await session.send(
-                                input=types.Blob(data=audio_data, mime_type=mime_type),
-                                end_of_turn=True
-                            )
+                            try:
+                                # Use send_realtime_input for audio with audio_stream_end
+                                logger.info(f"Sending audio file with mime_type: {mime_type}, size: {len(audio_data)} bytes")
+                                
+                                # Send all audio data at once
+                                await session.send_realtime_input(
+                                    audio=types.Blob(data=audio_data, mime_type=mime_type)
+                                )
+                                
+                                # Signal end of audio stream - tells Gemini the audio is complete
+                                await session.send_realtime_input(audio_stream_end=True)
+                                
+                                logger.info("Audio file sent successfully with audio_stream_end")
+                            except Exception as e:
+                                logger.error(f"Error sending audio file: {e}", exc_info=True)
                         else:
-                            # Regular text input
+                            # Regular text input - use send_client_content
                             text = text_or_audio
-                            # Send greeting trigger
-                            if text == "。":
-                                await session.send(input="你好", end_of_turn=True)
-                            else:
-                                await session.send(input=text, end_of_turn=True)
+                            # Send greeting trigger or regular text
+                            text_to_send = "你好" if text == "。" else text
+                            try:
+                                await session.send_client_content(
+                                    turns={"role": "user", "parts": [{"text": text_to_send}]},
+                                    turn_complete=True
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending text: {e}", exc_info=True)
                 except asyncio.CancelledError:
                     pass
 
@@ -229,6 +258,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                                 logger.info("Audio file processing complete (delayed)")
                                                 is_processing_file["value"] = False
                                                 is_processing_file["timer"] = None
+                                                # Resume realtime audio input
+                                                pause_realtime_audio["value"] = False
+                                                logger.info("Realtime audio input resumed")
+                                                # Notify frontend that file processing is complete
+                                                await event_queue.put({"server_content": {"file_upload_complete": True}})
                                         is_processing_file["timer"] = asyncio.create_task(reset_file_flag())
                                     await event_queue.put({"server_content": {"turn_complete": True}})
                                 

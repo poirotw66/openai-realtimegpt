@@ -141,15 +141,25 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                 if (!item || item.role !== 'user') break;
                 const itemId = getItemId(item);
                 const text = getUserMessageTextFromItem(item);
+                
+                // Check if this is a text input (not audio transcription)
+                const isTextInput = item.content?.some(part => part.type === 'input_text');
+                
                 if (text && !userItemIdsSent.has(itemId)) {
-                    userItemIdsSent.add(itemId);
-                    userMessageId = `user-${itemId || Date.now()}`;
-                    messageCallback({
-                        role: 'user',
-                        content: text,
-                        timestamp: new Date(),
-                        isStreaming: false
-                    }, userMessageId);
+                    // Skip text input messages as they are already displayed immediately in UI
+                    if (!isTextInput) {
+                        userItemIdsSent.add(itemId);
+                        userMessageId = `user-${itemId || Date.now()}`;
+                        messageCallback({
+                            role: 'user',
+                            content: text,
+                            timestamp: new Date(),
+                            isStreaming: false
+                        }, userMessageId);
+                    } else {
+                        // Mark text input as sent to prevent duplication
+                        userItemIdsSent.add(itemId);
+                    }
                 }
                 if (itemId) userMessageId = '';
                 currentUserMessage = '';

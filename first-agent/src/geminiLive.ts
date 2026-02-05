@@ -29,10 +29,14 @@ let scheduledSources: AudioBufferSourceNode[] = [];
 let micStream: MediaStream | null = null;
 let micContext: AudioContext | null = null;
 let micNode: AudioWorkletNode | ScriptProcessorNode | null = null;
+let isMicMuted = false;
 let outputTranscriptBuffer = '';
+let currentAssistantMessageId = '';  // Track current assistant message ID
 let currentUserMessageId = '';
 let userTranscriptBuffer = '';
 let isFileUploadSession = false;  // Track if we're in a file upload session
+let suppressAssistantResponse = false;  // Suppress intermediate responses during file upload
+let accumulatedAssistantResponse = '';  // Accumulate all AI responses during file upload
 
 export function setGeminiMessageCallback(callback: GeminiLiveMessageCallback | null): void {
   console.log('🔔 Gemini Live: Setting message callback:', callback ? 'callback set' : 'callback cleared');
@@ -98,14 +102,47 @@ function handleServerMessage(data: any): void {
     return;
   }
 
+  // File upload complete - reset file upload session
+  if (sc?.file_upload_complete) {
+    console.log('✅ Gemini Live: File upload complete, resetting session state');
+    
+    // Display accumulated AI response
+    if (accumulatedAssistantResponse.trim()) {
+      console.log('📤 Displaying accumulated AI response:', accumulatedAssistantResponse.length, 'chars');
+      messageCallback(
+        { role: 'assistant', content: accumulatedAssistantResponse.trim(), timestamp: new Date(), isStreaming: false },
+        `assistant-final-${Date.now()}`
+      );
+      accumulatedAssistantResponse = '';
+    }
+    
+    suppressAssistantResponse = false;  // Stop suppressing responses
+    isFileUploadSession = false;
+    currentUserMessageId = '';
+    userTranscriptBuffer = '';
+    outputTranscriptBuffer = '';
+    currentAssistantMessageId = '';
+    return;
+  }
+
   // Turn complete
   if (sc?.turnComplete ?? sc?.turn_complete) {
-    if (outputTranscriptBuffer.trim()) {
+    // During file upload, accumulate responses instead of displaying
+    if (isFileUploadSession && suppressAssistantResponse) {
+      // Accumulate AI response - will show after file_upload_complete
+      if (outputTranscriptBuffer.trim()) {
+        accumulatedAssistantResponse += (accumulatedAssistantResponse ? '\n\n' : '') + outputTranscriptBuffer.trim();
+        console.log('📦 File upload turn complete - accumulated response, total:', accumulatedAssistantResponse.length, 'chars');
+      }
+      outputTranscriptBuffer = '';
+      currentAssistantMessageId = '';
+    } else if (outputTranscriptBuffer.trim()) {
       messageCallback(
         { role: 'assistant', content: outputTranscriptBuffer.trim(), timestamp: new Date(), isStreaming: false },
-        'assistant-stream'
+        currentAssistantMessageId || `assistant-${Date.now()}`
       );
       outputTranscriptBuffer = '';
+      currentAssistantMessageId = '';  // Reset for next turn
     }
     // Finalize user message only if not in file upload session
     if (currentUserMessageId && userTranscriptBuffer.trim()) {
@@ -132,6 +169,7 @@ function handleServerMessage(data: any): void {
   // Interrupted – clear buffer and stop audio
   if (sc?.interrupted) {
     outputTranscriptBuffer = '';
+    currentAssistantMessageId = '';
     // Don't reset if in file upload session to prevent splitting
     if (!isFileUploadSession) {
       currentUserMessageId = '';
@@ -153,6 +191,14 @@ function handleServerMessage(data: any): void {
   if (inputTranscription?.text != null) {
     const text = String(inputTranscription.text).trim();
     const isFromFile = inputTranscription.is_from_file || false;
+    
+    // Skip text input transcriptions as they are already displayed immediately in UI
+    // Only process audio transcriptions (from microphone or file uploads)
+    if (!isFromFile && !micStream) {
+      // This is likely a text input response from backend, skip it
+      return;
+    }
+    
     if (text) {
       // If switching from realtime to file or vice versa, finalize previous message
       if (currentUserMessageId && ((isFileUploadSession && !isFromFile) || (!isFileUploadSession && isFromFile))) {
@@ -170,13 +216,18 @@ function handleServerMessage(data: any): void {
       // Update session type
       isFileUploadSession = isFromFile;
       
+      // Start suppressing assistant responses during file upload
+      if (isFromFile) {
+        suppressAssistantResponse = true;
+      }
+      
       // Accumulate user transcript in the same message
       if (!currentUserMessageId) {
-        // Use stable ID for uploaded files to prevent splitting
-        currentUserMessageId = isFromFile ? 'user-file-upload' : `user-${Date.now()}`;
+        // Generate unique ID for each upload or realtime session
+        currentUserMessageId = isFromFile ? `user-file-${Date.now()}` : `user-${Date.now()}`;
         userTranscriptBuffer = '';
         if (isFromFile) {
-          console.log('📎 Audio file upload - starting new session');
+          console.log('📎 Audio file upload - starting new session with ID:', currentUserMessageId);
         }
       }
       userTranscriptBuffer += text + ' ';
@@ -192,14 +243,30 @@ function handleServerMessage(data: any): void {
   const outputTranscription = sc?.outputTranscription ?? sc?.output_transcription;
   if (outputTranscription?.text != null) {
     const text = String(outputTranscription.text);
-    outputTranscriptBuffer += text;
     const finished = outputTranscription.finished ?? false;
+    
+    // During file upload, accumulate all responses silently
+    if (isFileUploadSession && suppressAssistantResponse) {
+      // Accumulate but don't display - will be shown after file_upload_complete
+      outputTranscriptBuffer += text;
+      console.log('🔇 Suppressing AI response during file upload, buffer:', outputTranscriptBuffer.length, 'chars');
+      return;
+    }
+    
+    outputTranscriptBuffer += text;
+    
+    // Create new message ID if this is a new response
+    if (!currentAssistantMessageId) {
+      currentAssistantMessageId = `assistant-${Date.now()}`;
+    }
+    
     messageCallback(
       { role: 'assistant', content: outputTranscriptBuffer, timestamp: new Date(), isStreaming: !finished },
-      'assistant-stream'
+      currentAssistantMessageId
     );
     if (finished) {
       outputTranscriptBuffer = '';
+      currentAssistantMessageId = '';  // Reset for next turn
     }
     return;
   }
@@ -209,13 +276,19 @@ function handleServerMessage(data: any): void {
   const parts = modelTurn?.parts;
   if (Array.isArray(parts) && parts.length > 0) {
     console.log('Gemini Live: model turn with', parts.length, 'parts');
+    
+    // Create new message ID if this is a new response
+    if (!currentAssistantMessageId) {
+      currentAssistantMessageId = `assistant-${Date.now()}`;
+    }
+    
     for (const part of parts) {
       if (part?.text) {
         outputTranscriptBuffer += part.text;
         console.log('Gemini Live: model turn text:', part.text);
         messageCallback(
           { role: 'assistant', content: outputTranscriptBuffer, timestamp: new Date(), isStreaming: true },
-          'assistant-stream'
+          currentAssistantMessageId
         );
       }
       const inlineData = part?.inlineData ?? part?.inline_data;
@@ -355,7 +428,7 @@ function float32ToPcm16Base64(float32: Float32Array): string {
 }
 
 function sendMicChunk(float32: Float32Array, sampleRate: number): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN || isMicMuted) return;
   const resampled = resampleTo16k(float32, sampleRate);
   const base64 = float32ToPcm16Base64(resampled);
   sendGeminiAudioBase64(base64);
@@ -414,6 +487,7 @@ export async function startGeminiMicrophone(): Promise<void> {
  * Stop microphone streaming.
  */
 export function stopGeminiMicrophone(): void {
+  isMicMuted = false;
   if (micNode) {
     try {
       micNode.disconnect();
@@ -498,9 +572,15 @@ export async function sendGeminiAudioFromFile(file: File): Promise<void> {
   }));
 }
 
-/** Gemini Live does not expose mute in the same way; report false for now. */
+/** Gemini Live supports mute by controlling microphone input. */
 export function getGeminiSupportsPause(): boolean {
-  return false;
+  return true;
+}
+
+/** Mute or unmute microphone input for Gemini Live. */
+export function pauseGeminiSession(muted: boolean): void {
+  isMicMuted = muted;
+  console.log(`🎤 Gemini Live: Microphone ${muted ? 'muted' : 'unmuted'}`);
 }
 
 export function isGeminiConnected(): boolean {
