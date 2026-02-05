@@ -8,6 +8,7 @@ import {
   sendGeminiAudioFromFile,
   sendGeminiText,
   getGeminiSupportsPause,
+  pauseGeminiSession,
   startGeminiMicrophone
 } from './geminiLive';
 import WelcomePage from './components/WelcomePage';
@@ -55,6 +56,7 @@ function App() {
             newMessages[existingIndex] = { ...message, messageId: id };
             return newMessages;
           }
+          // Add new streaming message at the end
           return [...prev, { ...message, messageId: id }];
         }
         const existingIndex = prev.findIndex(m => m.messageId === id);
@@ -63,6 +65,7 @@ function App() {
           newMessages[existingIndex] = { ...message, messageId: id, isStreaming: false };
           return newMessages;
         }
+        // Add new final message at the end
         return [...prev, { ...message, messageId: id, isStreaming: false }];
       });
     };
@@ -165,7 +168,11 @@ function App() {
   const handlePauseToggle = () => {
     if (!supportsPause) return;
     const nextPaused = !isPaused;
-    pauseSession(nextPaused);
+    if (selectedModel === 'gemini-live') {
+      pauseGeminiSession(nextPaused);
+    } else {
+      pauseSession(nextPaused);
+    }
     setIsPaused(nextPaused);
   };
 
@@ -177,6 +184,18 @@ function App() {
     }
     try {
       setTestAudioSending(true);
+      
+      // Mute microphone during file upload to prevent interference
+      const wasMuted = isPaused;
+      if (!wasMuted && supportsPause) {
+        if (selectedModel === 'gemini-live') {
+          pauseGeminiSession(true);
+        } else {
+          pauseSession(true);
+        }
+        setIsPaused(true);
+      }
+      
       if (selectedModel === 'gemini-live') {
         await sendGeminiAudioFromFile(file);
       } else {
@@ -184,6 +203,18 @@ function App() {
         setTimeout(() => flushUserMessagesFromSession(), 1000);
         setTimeout(() => flushUserMessagesFromSession(), 3000);
       }
+      
+      // Restore microphone state after a short delay
+      setTimeout(() => {
+        if (!wasMuted && supportsPause) {
+          if (selectedModel === 'gemini-live') {
+            pauseGeminiSession(false);
+          } else {
+            pauseSession(false);
+          }
+          setIsPaused(false);
+        }
+      }, 1000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`傳送失敗: ${msg}`);
@@ -201,19 +232,22 @@ function App() {
       const text = textInput.trim();
       setTextInput(''); // Clear input immediately
       
+      // Add user message to UI immediately for both models
+      const userMessageId = `user-text-${Date.now()}`;
+      messageHandlerRef.current({
+        role: 'user',
+        content: text,
+        timestamp: new Date(),
+        isStreaming: false
+      }, userMessageId);
+      
       if (selectedModel === 'gemini-live') {
         // Send text to Gemini Live
         sendGeminiText(text);
       } else {
-        // For OpenAI Realtime, text input is not directly supported yet
-        // Show message manually in UI
-        messageHandlerRef.current({
-          role: 'user',
-          content: text,
-          timestamp: new Date(),
-          isStreaming: false
-        }, `user-text-${Date.now()}`);
-        alert('OpenAI Realtime API 目前僅支持語音輸入，文字功能僅在 Gemini Live 中可用。');
+        // Send to OpenAI Realtime
+        const { sendTextMessage } = await import('./agent');
+        sendTextMessage(text);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -286,7 +320,7 @@ function App() {
                 <ThemeToggle />
                 {isConnected && supportsPause && (
                   <button type="button" className="btn-pause" onClick={handlePauseToggle}>
-                    {isPaused ? '繼續' : '暫停'}
+                    {isPaused ? '🎤 取消靜音' : '🔇 靜音'}
                   </button>
                 )}
                 {isConnected && (

@@ -14,13 +14,22 @@ interface ConversationViewProps {
 
 const ConversationView: React.FC<ConversationViewProps> = ({ messages }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Scroll to bottom whenever messages change
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+    // Fallback: scroll parent container
+    if (containerRef.current?.parentElement) {
+      const parent = containerRef.current.parentElement;
+      parent.scrollTop = parent.scrollHeight;
+    }
   }, [messages]);
 
   return (
-    <div className="conversation-container">
+    <div className="conversation-container" ref={containerRef}>
       {messages.length === 0 ? (
         <div className="conversation-empty">
           開始對麥克風說話，您的語音和 AI 的回覆會即時顯示在這裡。

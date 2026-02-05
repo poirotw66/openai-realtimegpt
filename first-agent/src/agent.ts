@@ -260,6 +260,30 @@ export async function sendAudioFromFile(file: File): Promise<void> {
   }
 }
 
+/**
+ * Send text message to OpenAI Realtime API
+ * Uses the sendMessage method which handles text input
+ */
+export function sendTextMessage(text: string): void {
+  if (!session) {
+    throw new Error('Not connected. Connect first before sending text.');
+  }
+  
+  const sessionAny = session as any;
+  if (typeof sessionAny.sendMessage !== 'function') {
+    throw new Error('Session does not support sendMessage method');
+  }
+  
+  try {
+    // Use sendMessage which will create the conversation item and trigger response
+    // The sessionHandler will automatically display the user message via events
+    sessionAny.sendMessage(text);
+  } catch (error) {
+    console.error('❌ Failed to send text message:', error);
+    throw error;
+  }
+}
+
 // Function to get current agent and session
 export function getAgent() {
   return agent;
