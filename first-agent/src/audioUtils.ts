@@ -3,7 +3,8 @@
  * Uses Web Audio API to decode and resample.
  */
 
-const TARGET_SAMPLE_RATE = 24000;
+const TARGET_SAMPLE_RATE_24K = 24000;
+const TARGET_SAMPLE_RATE_16K = 16000;
 
 /**
  * Resample a Float32Array from sourceRate to targetRate (simple linear interpolation).
@@ -63,7 +64,34 @@ export async function fileToPcm24k(file: File): Promise<ArrayBuffer> {
   const resampled = resample(
     channelData,
     sampleRate,
-    TARGET_SAMPLE_RATE
+    TARGET_SAMPLE_RATE_24K
+  );
+  return float32ToPcm16(resampled);
+}
+
+/**
+ * Decode audio file to PCM 16-bit 16kHz mono ArrayBuffer for Gemini Live API input.
+ */
+export async function fileToPcm16k(file: File): Promise<ArrayBuffer> {
+  const arrayBuffer = await file.arrayBuffer();
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+
+  let channelData = decoded.getChannelData(0);
+  const sampleRate = decoded.sampleRate;
+
+  if (decoded.numberOfChannels > 1) {
+    const other = decoded.getChannelData(1);
+    channelData = new Float32Array(channelData.length);
+    for (let i = 0; i < channelData.length; i++) {
+      channelData[i] = (decoded.getChannelData(0)[i] + other[i]) / 2;
+    }
+  }
+
+  const resampled = resample(
+    channelData,
+    sampleRate,
+    TARGET_SAMPLE_RATE_16K
   );
   return float32ToPcm16(resampled);
 }

@@ -69,14 +69,12 @@ When the conversation starts (right after the user connects, before they have sa
     model: REALTIME_MODEL,
     config: {
       input_audio_transcription: {
-        // Use whisper-1 for reliable transcription, then convert with OpenCC
         model: 'whisper-1',
         language: 'zh',
-        // Simple prompt for whisper-1
         prompt: DISPLAY_LANGUAGE === 'zh-TW' ? '繁體中文' : undefined
       }
     }
-  });
+  } as any);
 
   return { agent, session };
 }
@@ -93,29 +91,42 @@ export function setMessageCallback(callback: (message: { role: 'user' | 'assista
   setMessageCallbackForTools(callback);
 }
 
-const REALTIME_PROXY_URL = 'http://localhost:3001';
-
-/** Fetch ephemeral client secret from backend (uses OPENAI_API_KEY from server .env) */
+/** Fetch ephemeral client secret from backend (uses OPENAI_API_KEY from server .env). Use relative /api so Vite proxy can forward to 3001. */
 async function fetchClientSecret(): Promise<string> {
-  const res = await fetch(`${REALTIME_PROXY_URL}/api/realtime/client_secret`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session: { type: 'realtime', model: REALTIME_MODEL }
-    })
-  });
-  const data = await res.json();
-  if (!data.success || !data.value) {
-    throw new Error(data.error || 'Failed to get client secret from server');
+  let res: Response;
+  try {
+    res = await fetch('/api/realtime/client_secret', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: { type: 'realtime', model: REALTIME_MODEL }
+      })
+    });
+  } catch (e) {
+    throw new Error('無法連線到後端。請確認已執行 npm run dev-full（同時啟動 proxy 與前端）。');
+  }
+  let data: { success?: boolean; value?: string; error?: string };
+  try {
+    data = await res.json();
+  } catch (_) {
+    throw new Error(res.ok ? 'Invalid response from server' : `Server error: ${res.status}`);
+  }
+  if (!res.ok) {
+    throw new Error(data?.error || `Server error: ${res.status}`);
+  }
+  if (!data?.success || !data?.value) {
+    throw new Error(data?.error || 'Failed to get client secret from server');
   }
   return data.value;
 }
 
-// Function to connect to the session (apiKey optional: if omitted, backend provides ephemeral token)
-export async function connectSession(apiKey?: string) {
+// Connect to session: prefer env (backend) unless user provided a non-empty API key.
+// When apiKey is undefined, null, or blank, use backend OPENAI_API_KEY via fetchClientSecret().
+export async function connectSession(apiKey?: string | null) {
   try {
-    const token = apiKey ?? await fetchClientSecret();
-    console.log('Attempting to connect with', apiKey ? 'provided API key' : 'ephemeral token from server');
+    const useEnvKey = !apiKey || String(apiKey).trim() === '';
+    const token = useEnvKey ? await fetchClientSecret() : String(apiKey).trim();
+    console.log('Attempting to connect with', useEnvKey ? 'env key from server (OPENAI_API_KEY)' : 'user-provided API key');
     
     // Create agent and session with all tools (including MCP tools)
     const { agent: newAgent, session: newSession } = await createAgentWithTools();

@@ -3,7 +3,10 @@ import cors from 'cors';
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createServer } from 'http';
 import dotenv from 'dotenv';
+import WebSocket, { WebSocketServer } from 'ws';
+import { GoogleAuth } from 'google-auth-library';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load .env from first-agent or project root
@@ -15,6 +18,15 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+/** Get Google Cloud access token for Vertex AI (uses ADC or GOOGLE_APPLICATION_CREDENTIALS). */
+async function getGoogleAccessToken() {
+  const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  if (!tokenResponse.token) throw new Error('Failed to get Google Cloud access token');
+  return tokenResponse.token;
+}
 
 const uvPath = '/Users/cfh00896102/.local/bin/uv';
 
@@ -192,6 +204,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Gemini Live API config (Vertex AI: project ID and WebSocket URL)
+const GEMINI_LIVE_SERVICE_URL = 'wss://us-central1-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent';
+app.get('/api/gemini-live/config', (req, res) => {
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || '';
+  res.json({
+    success: true,
+    service_url: GEMINI_LIVE_SERVICE_URL,
+    project_id: projectId
+  });
+});
+
 // Create ephemeral client secret for Realtime API (uses OPENAI_API_KEY from env)
 app.post('/api/realtime/client_secret', async (req, res) => {
   try {
@@ -244,11 +267,125 @@ app.post('/api/realtime/client_secret', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Create HTTP server and attach WebSocket for Gemini Live proxy
+const server = createServer(app);
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+  if (pathname === '/ws/gemini-live') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+wss.on('connection', async (clientWs) => {
+  let serviceUrl = null;
+  let bearerToken = null;
+  let serverWs = null;
+
+  const firstMessageHandler = (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      serviceUrl = msg.service_url || null;
+      bearerToken = msg.bearer_token || null;
+    } catch (e) {
+      clientWs.close(1008, 'Invalid JSON');
+      return;
+    }
+  };
+
+  const onceFirst = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Timeout')), 10000);
+    clientWs.once('message', (data) => {
+      clearTimeout(timeout);
+      firstMessageHandler(data);
+      resolve();
+    });
+  });
+
+  try {
+    await onceFirst;
+  } catch (e) {
+    clientWs.close(1008, 'Timeout waiting for setup');
+    return;
+  }
+
+  if (!serviceUrl) {
+    clientWs.close(1008, 'service_url required');
+    return;
+  }
+
+  if (!bearerToken) {
+    try {
+      bearerToken = await getGoogleAccessToken();
+    } catch (err) {
+      console.error('❌ Gemini Live: failed to get access token:', err.message);
+      clientWs.close(1008, 'Authentication failed');
+      return;
+    }
+  }
+
+  const headers = {
+    Authorization: `Bearer ${bearerToken}`,
+    'Content-Type': 'application/json'
+  };
+
+  try {
+    serverWs = new WebSocket(serviceUrl, { headers });
+  } catch (e) {
+    clientWs.close(1008, 'Upstream connection failed');
+    return;
+  }
+
+  const clientMessageQueue = [];
+  function flushClientQueue() {
+    while (clientMessageQueue.length && serverWs && serverWs.readyState === WebSocket.OPEN) {
+      serverWs.send(clientMessageQueue.shift());
+    }
+  }
+
+  serverWs.on('open', () => {
+    console.log('✅ Gemini Live: connected to Vertex AI');
+    flushClientQueue();
+  });
+
+  serverWs.on('message', (data) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data);
+  });
+  serverWs.on('close', (code, reason) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close(code, reason);
+  });
+  serverWs.on('error', (err) => {
+    console.error('Gemini Live upstream error:', err.message);
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close(1011, 'Upstream error');
+  });
+
+  clientWs.on('message', (data) => {
+    if (serverWs && serverWs.readyState === WebSocket.OPEN) {
+      serverWs.send(data);
+    } else {
+      clientMessageQueue.push(data);
+    }
+  });
+  clientWs.on('close', () => {
+    if (serverWs) serverWs.close();
+  });
+  clientWs.on('error', () => {
+    if (serverWs) serverWs.close();
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`🚀 MCP Proxy Server running on http://localhost:${PORT}`);
   console.log('📡 Available endpoints:');
   console.log('  GET  /api/health - Health check');
   console.log('  POST /api/realtime/client_secret - Get ephemeral token (uses OPENAI_API_KEY from .env)');
+  console.log('  WS   /ws/gemini-live - Gemini Live API WebSocket proxy (Vertex AI, uses ADC)');
   console.log('  GET  /api/mcp/tools - List available MCP tools');
   console.log('  POST /api/mcp/tools/call - Call MCP tool');
 });
