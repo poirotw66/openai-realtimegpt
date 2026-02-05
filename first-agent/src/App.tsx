@@ -6,6 +6,7 @@ import {
   disconnectGeminiSession,
   setGeminiMessageCallback,
   sendGeminiAudioFromFile,
+  sendGeminiText,
   getGeminiSupportsPause,
   startGeminiMicrophone
 } from './geminiLive';
@@ -35,6 +36,8 @@ function App() {
   const [supportsPause, setSupportsPause] = useState(false);
   const [testAudioSending, setTestAudioSending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [isSendingText, setIsSendingText] = useState(false);
   const testAudioInputRef = useRef<HTMLInputElement>(null);
 
   const messageHandlerRef = useRef<(message: Message, messageId?: string) => void>(() => {});
@@ -43,7 +46,6 @@ function App() {
     const handler = (message: Message, messageId?: string) => {
       // Filter out trigger messages (both . and 。)
       if (message.role === 'user' && (message.content.trim() === '.' || message.content.trim() === '。')) return;
-      console.log('App: received message:', message);
       setMessages(prev => {
         const id = messageId || `${message.role}-${Date.now()}`;
         if (message.isStreaming) {
@@ -66,6 +68,11 @@ function App() {
     };
     messageHandlerRef.current = handler;
     setMessageCallback(handler);
+    
+    // Cleanup function to prevent duplicate callbacks
+    return () => {
+      setMessageCallback(null);
+    };
   }, []);
 
   const handleStartChat = () => {
@@ -186,6 +193,43 @@ function App() {
     }
   };
 
+  const handleSendText = async () => {
+    if (!textInput.trim() || !isConnected || isSendingText) return;
+    
+    try {
+      setIsSendingText(true);
+      const text = textInput.trim();
+      setTextInput(''); // Clear input immediately
+      
+      if (selectedModel === 'gemini-live') {
+        // Send text to Gemini Live
+        sendGeminiText(text);
+      } else {
+        // For OpenAI Realtime, text input is not directly supported yet
+        // Show message manually in UI
+        messageHandlerRef.current({
+          role: 'user',
+          content: text,
+          timestamp: new Date(),
+          isStreaming: false
+        }, `user-text-${Date.now()}`);
+        alert('OpenAI Realtime API 目前僅支持語音輸入，文字功能僅在 Gemini Live 中可用。');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`發送文字失敗: ${msg}`);
+    } finally {
+      setIsSendingText(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendText();
+    }
+  };
+
   const renderCurrentView = () => {
     switch (currentView) {
       case 'welcome':
@@ -258,6 +302,25 @@ function App() {
             </div>
             
             <div className="chat-footer">
+              <div className="text-input-section">
+                <input
+                  type="text"
+                  className="text-input"
+                  placeholder="輸入文字消息..."
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  disabled={!isConnected || isSendingText}
+                />
+                <button
+                  type="button"
+                  className="btn-send-text"
+                  onClick={handleSendText}
+                  disabled={!isConnected || isSendingText || !textInput.trim()}
+                >
+                  {isSendingText ? '發送中...' : '發送'}
+                </button>
+              </div>
               <div className="test-audio-section">
                 <label className="test-audio-label">
                   <span>測試音檔：</span>
@@ -280,7 +343,7 @@ function App() {
               </div>
               <p className="chat-hint">
                 {isConnected
-                  ? '可直接對麥克風說話，或使用上方「測試音檔」上傳音檔。'
+                  ? '可直接對麥克風說話、輸入文字，或上傳音檔。'
                   : '連接已中斷'}
               </p>
             </div>

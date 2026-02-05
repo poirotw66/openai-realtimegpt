@@ -1,6 +1,6 @@
 /**
- * Gemini Live API client (Vertex AI).
- * Uses WebSocket proxy and Vertex AI BidiGenerateContent protocol.
+ * Gemini Live API client.
+ * Uses Python backend with google-genai SDK (like plain-js-python-sdk-demo-app).
  * @see https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api
  */
 
@@ -14,11 +14,6 @@ function getWsProxyUrl(): string {
   return `${protocol}//${host}`;
 }
 
-const VERTEX_SERVICE_URL = 'wss://us-central1-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent';
-
-/** Model ID for Vertex AI Live (GA or preview). */
-const GEMINI_LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
-
 export type GeminiLiveMessageCallback = (message: {
   role: 'user' | 'assistant';
   content: string;
@@ -29,22 +24,23 @@ export type GeminiLiveMessageCallback = (message: {
 let messageCallback: GeminiLiveMessageCallback | null = null;
 let ws: WebSocket | null = null;
 let playbackContext: AudioContext | null = null;
+let nextStartTime = 0;
+let scheduledSources: AudioBufferSourceNode[] = [];
 let micStream: MediaStream | null = null;
 let micContext: AudioContext | null = null;
 let micNode: AudioWorkletNode | ScriptProcessorNode | null = null;
 let outputTranscriptBuffer = '';
+let currentUserMessageId = '';
+let userTranscriptBuffer = '';
+let isFileUploadSession = false;  // Track if we're in a file upload session
 
 export function setGeminiMessageCallback(callback: GeminiLiveMessageCallback | null): void {
   console.log('🔔 Gemini Live: Setting message callback:', callback ? 'callback set' : 'callback cleared');
   messageCallback = callback;
 }
 
-function getModelUri(projectId: string): string {
-  return `projects/${projectId}/locations/us-central1/publishers/google/models/${GEMINI_LIVE_MODEL}`;
-}
-
 /**
- * Play PCM 16-bit 24kHz mono (base64) using Web Audio API.
+ * Play PCM 16-bit 24kHz mono (base64) using Web Audio API with scheduling.
  */
 function playPcm24kBase64(base64: string): void {
   try {
@@ -66,7 +62,18 @@ function playPcm24kBase64(base64: string): void {
     const source = ctx.createBufferSource();
     source.buffer = buf;
     source.connect(ctx.destination);
-    source.start(0);
+    
+    // Schedule audio to play sequentially
+    const now = ctx.currentTime;
+    nextStartTime = Math.max(now, nextStartTime);
+    source.start(nextStartTime);
+    nextStartTime += buf.duration;
+    
+    scheduledSources.push(source);
+    source.onended = () => {
+      const idx = scheduledSources.indexOf(source);
+      if (idx > -1) scheduledSources.splice(idx, 1);
+    };
   } catch (e) {
     console.warn('Gemini Live: play audio error', e);
   }
@@ -78,8 +85,6 @@ function getServerContent(data: any): any {
 }
 
 function handleServerMessage(data: any): void {
-  console.log('Gemini Live: received message:', JSON.stringify(data, null, 2));
-  
   if (!messageCallback) {
     console.warn('Gemini Live: no message callback set');
     return;
@@ -87,10 +92,9 @@ function handleServerMessage(data: any): void {
 
   const sc = getServerContent(data);
 
-  // Setup complete (Vertex may send setup_complete in snake_case) – trigger greeting like GPT Realtime
+  // Setup complete - Python backend sends this
   if (data?.setupComplete ?? (data as any)?.setup_complete) {
-    console.log('Gemini Live: setup complete, triggering greeting.');
-    sendGeminiTriggerGreeting();
+    console.log('Gemini Live: setup complete received.');
     return;
   }
 
@@ -99,16 +103,48 @@ function handleServerMessage(data: any): void {
     if (outputTranscriptBuffer.trim()) {
       messageCallback(
         { role: 'assistant', content: outputTranscriptBuffer.trim(), timestamp: new Date(), isStreaming: false },
-        `assistant-${Date.now()}`
+        'assistant-stream'
       );
       outputTranscriptBuffer = '';
+    }
+    // Finalize user message only if not in file upload session
+    if (currentUserMessageId && userTranscriptBuffer.trim()) {
+      if (isFileUploadSession) {
+        // Keep accumulating for file uploads - just update as non-streaming
+        messageCallback(
+          { role: 'user', content: userTranscriptBuffer.trim(), timestamp: new Date(), isStreaming: false },
+          currentUserMessageId
+        );
+        console.log('📝 Audio file segment complete, waiting for more...');
+      } else {
+        // Finalize and reset for realtime voice
+        messageCallback(
+          { role: 'user', content: userTranscriptBuffer.trim(), timestamp: new Date(), isStreaming: false },
+          currentUserMessageId
+        );
+        currentUserMessageId = '';
+        userTranscriptBuffer = '';
+      }
     }
     return;
   }
 
-  // Interrupted – clear buffer
+  // Interrupted – clear buffer and stop audio
   if (sc?.interrupted) {
     outputTranscriptBuffer = '';
+    // Don't reset if in file upload session to prevent splitting
+    if (!isFileUploadSession) {
+      currentUserMessageId = '';
+      userTranscriptBuffer = '';
+    }
+    // Stop all scheduled audio
+    scheduledSources.forEach((s) => {
+      try { s.stop(); } catch (e) {}
+    });
+    scheduledSources = [];
+    if (playbackContext) {
+      nextStartTime = playbackContext.currentTime;
+    }
     return;
   }
 
@@ -116,11 +152,37 @@ function handleServerMessage(data: any): void {
   const inputTranscription = sc?.inputTranscription ?? sc?.input_transcription;
   if (inputTranscription?.text != null) {
     const text = String(inputTranscription.text).trim();
-    console.log('Gemini Live: user transcription:', text);
+    const isFromFile = inputTranscription.is_from_file || false;
     if (text) {
+      // If switching from realtime to file or vice versa, finalize previous message
+      if (currentUserMessageId && ((isFileUploadSession && !isFromFile) || (!isFileUploadSession && isFromFile))) {
+        // Finalize previous message
+        if (userTranscriptBuffer.trim()) {
+          messageCallback(
+            { role: 'user', content: userTranscriptBuffer.trim(), timestamp: new Date(), isStreaming: false },
+            currentUserMessageId
+          );
+        }
+        currentUserMessageId = '';
+        userTranscriptBuffer = '';
+      }
+      
+      // Update session type
+      isFileUploadSession = isFromFile;
+      
+      // Accumulate user transcript in the same message
+      if (!currentUserMessageId) {
+        // Use stable ID for uploaded files to prevent splitting
+        currentUserMessageId = isFromFile ? 'user-file-upload' : `user-${Date.now()}`;
+        userTranscriptBuffer = '';
+        if (isFromFile) {
+          console.log('📎 Audio file upload - starting new session');
+        }
+      }
+      userTranscriptBuffer += text + ' ';
       messageCallback(
-        { role: 'user', content: text, timestamp: new Date(), isStreaming: false },
-        `user-${Date.now()}`
+        { role: 'user', content: userTranscriptBuffer, timestamp: new Date(), isStreaming: true },
+        currentUserMessageId
       );
     }
     return;
@@ -129,21 +191,26 @@ function handleServerMessage(data: any): void {
   // Assistant output transcription (streaming)
   const outputTranscription = sc?.outputTranscription ?? sc?.output_transcription;
   if (outputTranscription?.text != null) {
-    outputTranscriptBuffer += outputTranscription.text;
-    console.log('Gemini Live: assistant transcription:', outputTranscriptBuffer, 'finished:', finished);
-    const finished = outputTranscription.finished ?? true;
+    const text = String(outputTranscription.text);
+    outputTranscriptBuffer += text;
+    const finished = outputTranscription.finished ?? false;
     messageCallback(
       { role: 'assistant', content: outputTranscriptBuffer, timestamp: new Date(), isStreaming: !finished },
       'assistant-stream'
     );
+    if (finished) {
+      outputTranscriptBuffer = '';
+    }
     return;
   }
 
   // Model turn: text and audio parts (support modelTurn / model_turn, inlineData / inline_data)
   const modelTurn = sc?.modelTurn ?? sc?.model_turn;
-  coconsole.log('Gemini Live: model turn with', parts.length, 'parts');
+  const parts = modelTurn?.parts;
+  if (Array.isArray(parts) && parts.length > 0) {
+    console.log('Gemini Live: model turn with', parts.length, 'parts');
     for (const part of parts) {
-      if (part.text) {
+      if (part?.text) {
         outputTranscriptBuffer += part.text;
         console.log('Gemini Live: model turn text:', part.text);
         messageCallback(
@@ -151,19 +218,18 @@ function handleServerMessage(data: any): void {
           'assistant-stream'
         );
       }
-      const inlineData = part.inlineData ?? part.inline_data;
+      const inlineData = part?.inlineData ?? part?.inline_data;
       if (inlineData?.data) {
         console.log('Gemini Live: playing audio chunk');
-      const inlineData = part.inlineData ?? part.inline_data;
-      if (inlineData?.data) {
         playPcm24kBase64(inlineData.data);
       }
     }
+    return;
   }
 }
 
 /**
- * Connect to Gemini Live API via proxy. Uses GOOGLE_CLOUD_PROJECT from server or provided projectId.
+ * Connect to Gemini Live API via Python backend.
  */
 export function connectGeminiSession(projectId: string): Promise<void> {
   console.log('🔌 Gemini Live: connectGeminiSession called with projectId:', projectId);
@@ -180,52 +246,59 @@ export function connectGeminiSession(projectId: string): Promise<void> {
 
     ws.onerror = (error) => {
       console.error('❌ Gemini Live: WebSocket error:', error);
-      reject(new Error('WebSocket connection failed. Is the proxy running (npm run dev-full)?'));
+      reject(new Error('WebSocket connection failed. Is the Python backend running?'));
     };
 
-  ws.onclose = (ev) => {
-    console.log('🔌 Gemini Live: WebSocket closed. Code:', ev.code, 'Reason:', ev.reason, 'Clean:', ev.wasClean);
-    ws = null;
-    stopGeminiMicrophone();
-    if (playbackContext) {
-      playbackContext.close().catch(() => {});
-      playbackContext = null;
-    }
-    if (!ev.wasClean && ev.code !== 1000) {
-      reject(new Error(ev.reason || 'Connection closed'));
-    }
-  };
+    ws.onclose = (ev) => {
+      console.log('🔌 Gemini Live: WebSocket closed. Code:', ev.code, 'Reason:', ev.reason, 'Clean:', ev.wasClean);
+      ws = null;
+      stopGeminiMicrophone();
+      if (playbackContext) {
+        playbackContext.close().catch(() => {});
+        playbackContext = null;
+      }
+      if (!ev.wasClean && ev.code !== 1000) {
+        reject(new Error(ev.reason || 'Connection closed'));
+      }
+    };
 
     ws.onopen = () => {
-      console.log('✅ Gemini Live: WebSocket connected!');
-      
-      // First message: service URL for proxy to connect to Vertex
-      const serviceUrlMsg = { service_url: VERTEX_SERVICE_URL };
-      console.log('📤 Gemini Live: Sending service URL:', serviceUrlMsg);
-      ws!.send(JSON.stringify(serviceUrlMsg));
-
-      const modelUri = getModelUri(projectId);
-      console.log('📤 Gemini Live: Using model URI:', modelUri);
-      
-      // Try absolute minimal setup - just model name
-      const setupMessage = {
-        setup: {
-          model: modelUri
-        }
-      };
-      
-      console.log('📤 Gemini Live: Sending minimal setup message:', JSON.stringify(setupMessage, null, 2));
-      ws!.send(JSON.stringify(setupMessage));
+      console.log('✅ Gemini Live: WebSocket connected to Python backend!');
       outputTranscriptBuffer = '';
       console.log('✅ Gemini Live: Setup complete, resolving promise');
+      // Trigger greeting after connection
+      setTimeout(() => {
+        sendGeminiTriggerGreeting();
+      }, 500);
       resolve();
     };
 
     ws.onmessage = (event) => {
-      console.log('📨 Gemini Live: Received raw message:', event.data);
+      if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+        // Binary audio data
+        const processAudio = async () => {
+          let arrayBuffer: ArrayBuffer;
+          if (event.data instanceof Blob) {
+            arrayBuffer = await event.data.arrayBuffer();
+          } else {
+            arrayBuffer = event.data;
+          }
+          
+          // Convert Int16 PCM to base64 and play
+          const int16Array = new Int16Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < int16Array.length; i++) {
+            binary += String.fromCharCode(int16Array[i] & 0xff, (int16Array[i] >> 8) & 0xff);
+          }
+          playPcm24kBase64(btoa(binary));
+        };
+        processAudio().catch(e => console.error('❌ Audio processing error:', e));
+        return;
+      }
+
+      // JSON messages
       try {
         const data = JSON.parse(event.data as string);
-        console.log('📨 Gemini Live: Parsed message:', data);
         handleServerMessage(data);
       } catch (e) {
         console.error('❌ Gemini Live: parse message error', e, 'Raw data:', event.data);
@@ -245,6 +318,8 @@ export function disconnectGeminiSession(): void {
     playbackContext = null;
   }
   outputTranscriptBuffer = '';
+  nextStartTime = 0;
+  scheduledSources = [];
 }
 
 const GEMINI_MIC_TARGET_RATE = 16000;
@@ -356,7 +431,7 @@ export function stopGeminiMicrophone(): void {
 }
 
 /**
- * Trigger the model to say the greeting (same as GPT Realtime). Call after setupComplete.
+ * Trigger the model to say the greeting. Send a trigger text after connection.
  */
 function sendGeminiTriggerGreeting(): void {
   console.log('👋 Gemini Live: sendGeminiTriggerGreeting called');
@@ -364,51 +439,63 @@ function sendGeminiTriggerGreeting(): void {
     console.warn('⚠️ Gemini Live: Cannot send greeting - WebSocket not open');
     return;
   }
-  const message = {
-    client_content: {
-      turns: [{ role: 'user', parts: [{ text: '。' }] }],
-      turn_complete: true
-    }
-  };
-  console.log('📤 Gemini Live: Sending greeting trigger:', message);
-  ws.send(JSON.stringify(message));
+  // Send text trigger to Python backend
+  ws.send(JSON.stringify({ text: '。' }));
 }
 
 /**
- * Send PCM 16kHz 16-bit mono audio (base64) to Gemini Live.
+ * Send PCM 16kHz 16-bit mono audio (raw bytes) to Python backend.
  */
 export function sendGeminiAudioBase64(base64Pcm: string): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const message = {
-    realtime_input: {
-      media_chunks: [{ mime_type: 'audio/pcm;rate=16000', data: base64Pcm }]
-    }
-  };
-  ws.send(JSON.stringify(message));
+  // Convert base64 to binary and send as ArrayBuffer
+  const binary = atob(base64Pcm);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  ws.send(bytes.buffer);
+}
+
+/**
+ * Send text message to Gemini Live
+ */
+export function sendGeminiText(text: string): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    throw new Error('WebSocket not connected');
+  }
+  // Send text as JSON message
+  ws.send(JSON.stringify({ text: text }));
 }
 
 /** Chunk size for file upload: ~100ms at 16kHz 16-bit mono. */
 const GEMINI_AUDIO_CHUNK_BYTES = 3200;
 
 /**
- * Send audio file as user input (same as GPT Realtime: upload = user speech).
- * Converts to 16kHz PCM and sends in chunks so the server can transcribe and respond.
+ * Send audio file as user input.
+ * Sends the entire audio file at once (not streaming) so Gemini will process it completely before responding.
  */
 export async function sendGeminiAudioFromFile(file: File): Promise<void> {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    throw new Error('WebSocket not connected');
+  }
+  
   const pcmBuffer = await fileToPcm16k(file);
   const bytes = new Uint8Array(pcmBuffer);
-  let offset = 0;
-  while (offset < bytes.length) {
-    const end = Math.min(offset + GEMINI_AUDIO_CHUNK_BYTES, bytes.length);
-    const chunk = bytes.subarray(offset, end);
-    let binary = '';
-    for (let i = 0; i < chunk.length; i++) binary += String.fromCharCode(chunk[i]);
-    sendGeminiAudioBase64(btoa(binary));
-    offset = end;
-    if (offset < bytes.length) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
+  
+  // Convert entire audio to base64
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
+  const base64Audio = btoa(binary);
+  
+  // Send as a special audio upload message (not realtime streaming)
+  ws.send(JSON.stringify({
+    type: 'audio_file',
+    data: base64Audio,
+    mime_type: 'audio/pcm;rate=16000'
+  }));
 }
 
 /** Gemini Live does not expose mute in the same way; report false for now. */

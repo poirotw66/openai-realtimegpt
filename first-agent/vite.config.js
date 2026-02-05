@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': { target: 'http://localhost:3001', changeOrigin: true },
-      '/ws': { target: 'http://localhost:3001', ws: true },
+      '/ws/gemini-live': { target: 'ws://localhost:8001', ws: true, rewrite: (path) => path.replace(/^\/ws\/gemini-live/, '/ws') },
     },
   },
 })
