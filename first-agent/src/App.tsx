@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { connectSession, disconnectSession, pauseSession, getSupportsPause, setMessageCallback, sendAudioFromFile, flushUserMessagesFromSession } from './agent';
+import {
+  connectGeminiSession,
+  disconnectGeminiSession,
+  setGeminiMessageCallback,
+  sendGeminiAudioFromFile,
+  getGeminiSupportsPause,
+  startGeminiMicrophone
+} from './geminiLive';
 import WelcomePage from './components/WelcomePage';
 import ModelSelection from './components/ModelSelection';
 import ConversationView from './components/ConversationView';
@@ -29,55 +37,45 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const testAudioInputRef = useRef<HTMLInputElement>(null);
 
+  const messageHandlerRef = useRef<(message: Message, messageId?: string) => void>(() => {});
+
   useEffect(() => {
-    setMessageCallback((message: Message, messageId?: string) => {
-      // Hide initial greeting trigger (single dot sent to make model say hello)
-      if (message.role === 'user' && message.content.trim() === '.') return;
-      
+    const handler = (message: Message, messageId?: string) => {
+      // Filter out trigger messages (both . and 。)
+      if (message.role === 'user' && (message.content.trim() === '.' || message.content.trim() === '。')) return;
+      console.log('App: received message:', message);
       setMessages(prev => {
         const id = messageId || `${message.role}-${Date.now()}`;
-        
-        // For streaming messages, update existing or add new
         if (message.isStreaming) {
           const existingIndex = prev.findIndex(m => m.messageId === id);
           if (existingIndex !== -1) {
             const newMessages = [...prev];
             newMessages[existingIndex] = { ...message, messageId: id };
             return newMessages;
-          } else {
-            return [...prev, { ...message, messageId: id }];
           }
-        } 
-        // For final messages, always update existing or add new
-        else {
-          const existingIndex = prev.findIndex(m => m.messageId === id);
-          if (existingIndex !== -1) {
-            // Update existing message with final content
-            const newMessages = [...prev];
-            newMessages[existingIndex] = { ...message, messageId: id, isStreaming: false };
-            return newMessages;
-          } else {
-            // Add new final message only if no existing message with same ID
-            return [...prev, { ...message, messageId: id, isStreaming: false }];
-          }
+          return [...prev, { ...message, messageId: id }];
         }
+        const existingIndex = prev.findIndex(m => m.messageId === id);
+        if (existingIndex !== -1) {
+          const newMessages = [...prev];
+          newMessages[existingIndex] = { ...message, messageId: id, isStreaming: false };
+          return newMessages;
+        }
+        return [...prev, { ...message, messageId: id, isStreaming: false }];
       });
-    });
+    };
+    messageHandlerRef.current = handler;
+    setMessageCallback(handler);
   }, []);
 
   const handleStartChat = () => {
     setCurrentView('model-selection');
   };
 
-  const handleSelectModel = (model: 'gpt-realtime' | 'gemini-live', apiKey?: string) => {
-    if (model === 'gemini-live') {
-      alert('Gemini Live 功能即將推出，請選擇 GPT Realtime');
-      return;
-    }
-    
+  const handleSelectModel = (model: 'gpt-realtime' | 'gemini-live', apiKey?: string, projectId?: string) => {
     setSelectedModel(model);
     setCurrentView('connecting');
-    handleConnect(apiKey);
+    handleConnect(model, apiKey, projectId);
   };
 
   const handleBackToWelcome = () => {
@@ -90,29 +88,52 @@ function App() {
     handleDisconnect();
   };
 
-  const handleConnect = async (apiKey?: string) => {
+  const handleConnect = async (model: 'gpt-realtime' | 'gemini-live', apiKey?: string, projectId?: string) => {
+    console.log('🔌 App: handleConnect called with model:', model);
     try {
       setIsConnecting(true);
       setMessages([]);
-      
-      await connectSession(apiKey);
-      setIsConnected(true);
-      setIsListening(true);
-      setIsPaused(false);
-      setSupportsPause(getSupportsPause());
-      setCurrentView('chat');
-      
-      setMessages([{
-        role: 'assistant',
-        content: '🔗 已連接到 GPT Realtime！請開始說話...',
-        timestamp: new Date()
-      }]);
-      
+
+      if (model === 'gemini-live') {
+        console.log('🔌 App: Connecting to Gemini Live...');
+        const pid = projectId?.trim() || '';
+        console.log('🔌 App: Project ID:', pid ? pid : '(empty)');
+        if (!pid) {
+          alert('請在 Gemini Live 卡片上點齒輪圖示，輸入 Google Cloud 專案 ID。若已於 first-agent 的 .env 設定 VITE_GOOGLE_CLOUD_PROJECT，請重新整理頁面後再試。');
+          setCurrentView('model-selection');
+          return;
+        }
+        console.log('🔌 App: Setting Gemini message callback...');
+        setGeminiMessageCallback(messageHandlerRef.current);
+        console.log('🔌 App: Calling connectGeminiSession...');
+        await connectGeminiSession(pid);
+        console.log('✅ App: connectGeminiSession completed');
+        console.log('🎤 App: Starting Gemini microphone...');
+        await startGeminiMicrophone();
+        console.log('✅ App: Gemini microphone started');
+        setIsConnected(true);
+        setIsListening(true);
+        setIsPaused(false);
+        setSupportsPause(getGeminiSupportsPause());
+        setCurrentView('chat');
+        console.log('✅ App: Gemini Live connection complete');
+        // Don't add manual message - let AI greet naturally via setupComplete trigger
+      } else {
+        // Use env key from backend unless user entered a non-empty API key in the GPT card settings
+        const userApiKey = apiKey != null && String(apiKey).trim() !== '' ? String(apiKey).trim() : undefined;
+        await connectSession(userApiKey);
+        setIsConnected(true);
+        setIsListening(true);
+        setIsPaused(false);
+        setSupportsPause(getSupportsPause());
+        setCurrentView('chat');
+        // Don't add manual message - let AI greet naturally via system instructions
+      }
     } catch (error) {
       console.error('Connection error:', error);
-      const errorMessage = apiKey 
-        ? '連接失敗。請檢查您輸入的 API Key 是否正確。'
-        : '連接失敗。請確保 MCP proxy 正在運行 (npm run dev-full) 且 .env 中已設定 OPENAI_API_KEY，或使用自訂 API Key。';
+      const errorMessage = model === 'gemini-live'
+        ? '連接失敗。請確認：1) 已執行 npm run dev-full（同時啟動 proxy 與前端）2) 已執行 gcloud auth application-default login 3) 專案 ID 正確。'
+        : '連接失敗。請確認：1) 已執行 npm run dev-full（同時啟動 proxy 與前端）2) .env 中已設定 OPENAI_API_KEY（未輸入自訂金鑰時會使用）。若已輸入自訂 API Key 請檢查是否正確。';
       alert(errorMessage);
       setCurrentView('model-selection');
     } finally {
@@ -121,7 +142,12 @@ function App() {
   };
 
   const handleDisconnect = () => {
-    disconnectSession();
+    if (selectedModel === 'gemini-live') {
+      disconnectGeminiSession();
+      setGeminiMessageCallback(null);
+    } else {
+      disconnectSession();
+    }
     setIsConnected(false);
     setIsListening(false);
     setIsPaused(false);
@@ -144,75 +170,19 @@ function App() {
     }
     try {
       setTestAudioSending(true);
-      await sendAudioFromFile(file);
-      
-      // Simple retry mechanism for transcription
-      setTimeout(() => flushUserMessagesFromSession(), 1000);
-      setTimeout(() => flushUserMessagesFromSession(), 3000);
+      if (selectedModel === 'gemini-live') {
+        await sendGeminiAudioFromFile(file);
+      } else {
+        await sendAudioFromFile(file);
+        setTimeout(() => flushUserMessagesFromSession(), 1000);
+        setTimeout(() => flushUserMessagesFromSession(), 3000);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`傳送失敗: ${msg}`);
     } finally {
       setTestAudioSending(false);
       if (testAudioInputRef.current) testAudioInputRef.current.value = '';
-    }
-  };
-
-  const debugSessionHistory = () => {
-    flushUserMessagesFromSession();
-  };
-
-  const testAIResponse = () => {
-    const testResponses = [
-      '你好！我是 AI 助手，很高興為您服務。',
-      '我可以幫助您回答問題和進行對話。',
-      '請問有什麼我可以協助您的嗎？',
-      '您的中文說得很好！',
-      '今天天氣真不錯，適合出門走走。'
-    ];
-    
-    const randomResponse = testResponses[Math.floor(Math.random() * testResponses.length)];
-    
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: randomResponse,
-      timestamp: new Date()
-    }]);
-  };
-
-  const testVoiceRecognition = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-        const recognition = new SpeechRecognition();
-        
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'zh-CN';
-        
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[event.results.length - 1][0].transcript;
-          setMessages(prev => [...prev, {
-            role: 'user',
-            content: transcript,
-            timestamp: new Date()
-          }]);
-        };
-        
-        recognition.start();
-        
-        setTimeout(() => {
-          recognition.stop();
-        }, 10000);
-        
-      }
-      
-      stream.getTracks().forEach(track => track.stop());
-      
-    } catch (error) {
-      console.error('Voice test failed:', error);
     }
   };
 
@@ -246,7 +216,7 @@ function App() {
           <div className="connecting-view">
             <div className="connecting-container">
               <div className="loading-spinner"></div>
-              <h2>連接中...</h2>
+              <h2>連接中{isConnecting ? '…' : ''}</h2>
               <p>正在建立與 {selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live'} 的連接</p>
             </div>
           </div>
