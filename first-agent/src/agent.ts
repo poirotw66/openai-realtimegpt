@@ -261,22 +261,25 @@ export async function sendAudioFromFile(file: File): Promise<void> {
 }
 
 /**
- * Send text message to OpenAI Realtime API
- * Uses the sendMessage method which handles text input
+ * Send text message to OpenAI Realtime API.
+ * Cancels any in-progress model response first so the new user message is handled immediately.
  */
 export function sendTextMessage(text: string): void {
   if (!session) {
     throw new Error('Not connected. Connect first before sending text.');
   }
-  
+
   const sessionAny = session as any;
   if (typeof sessionAny.sendMessage !== 'function') {
     throw new Error('Session does not support sendMessage method');
   }
-  
+
   try {
-    // Use sendMessage which will create the conversation item and trigger response
-    // The sessionHandler will automatically display the user message via events
+    // Interrupt current model speech so the new text is processed without waiting
+    if (typeof sessionAny.send === 'function') {
+      sessionAny.send({ type: 'response.cancel' });
+    }
+    // Add user message and trigger new response
     sessionAny.sendMessage(text);
   } catch (error) {
     console.error('❌ Failed to send text message:', error);
