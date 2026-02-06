@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { IconArrowLeft, IconEye, IconEyeOff, IconMic, IconSpeaker, IconSparkles } from './Icons';
 
 interface ModelSelectionProps {
   onSelectModel: (model: 'gpt-realtime' | 'gemini-live', apiKey?: string, projectId?: string) => void;
@@ -48,8 +49,9 @@ const ModelSelection: React.FC<ModelSelectionProps> = ({ onSelectModel, onBack }
     <div className="model-selection-page">
       <div className="model-selection-container">
         <div className="model-selection-header">
-          <button className="back-btn" onClick={onBack}>
-            ← 返回
+          <button type="button" className="back-btn" onClick={onBack} aria-label="返回">
+            <IconArrowLeft width={20} height={20} />
+            <span>返回</span>
           </button>
           <h2>選擇對話模型</h2>
           <p className="selection-subtitle">請選擇您想使用的 AI 語音助手</p>
@@ -101,9 +103,9 @@ const ModelSelection: React.FC<ModelSelectionProps> = ({ onSelectModel, onBack }
                       e.stopPropagation();
                       setShowApiKey(!showApiKey);
                     }}
-                    aria-label={showApiKey ? '隱藏' : '顯示'}
+                    aria-label={showApiKey ? '隱藏 API Key' : '顯示 API Key'}
                   >
-                    {showApiKey ? '👁️' : '👁️‍🗨️'}
+                    {showApiKey ? <IconEyeOff width={20} height={20} /> : <IconEye width={20} height={20} />}
                   </button>
                 </div>
                 <p className="api-key-hint">
@@ -113,9 +115,18 @@ const ModelSelection: React.FC<ModelSelectionProps> = ({ onSelectModel, onBack }
             )}
             
             <div className="model-features">
-              <span className="feature-tag">🎤 語音識別</span>
-              <span className="feature-tag">🗣️ 語音合成</span>
-              <span className="feature-tag">🧠 智能對話</span>
+              <span className="feature-tag">
+                <IconMic width={14} height={14} />
+                語音識別
+              </span>
+              <span className="feature-tag">
+                <IconSpeaker width={14} height={14} />
+                語音合成
+              </span>
+              <span className="feature-tag">
+                <IconSparkles width={14} height={14} />
+                智能對話
+              </span>
             </div>
           </div>
 
@@ -163,9 +174,18 @@ const ModelSelection: React.FC<ModelSelectionProps> = ({ onSelectModel, onBack }
               </div>
             )}
             <div className="model-features">
-              <span className="feature-tag">🎤 語音識別</span>
-              <span className="feature-tag">🗣️ 語音合成</span>
-              <span className="feature-tag">👁️ 視覺理解</span>
+              <span className="feature-tag">
+                <IconMic width={14} height={14} />
+                語音識別
+              </span>
+              <span className="feature-tag">
+                <IconSpeaker width={14} height={14} />
+                語音合成
+              </span>
+              <span className="feature-tag">
+                <IconSparkles width={14} height={14} />
+                視覺理解
+              </span>
             </div>
           </div>
         </div>

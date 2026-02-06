@@ -15,6 +15,7 @@ import WelcomePage from './components/WelcomePage';
 import ModelSelection from './components/ModelSelection';
 import ConversationView from './components/ConversationView';
 import ThemeToggle from './components/ThemeToggle';
+import { IconArrowLeft, IconMic, IconMicOff, IconPause, IconPhoneOff, IconSend, IconUpload } from './components/Icons';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -304,28 +305,46 @@ function App() {
         return (
           <div className="chat-view">
             <div className="chat-header">
-              <button className="back-btn" onClick={handleBackToModelSelection}>
-                ← 選擇其他模型
+              <button type="button" className="back-btn" onClick={handleBackToModelSelection} aria-label="選擇其他模型">
+                <IconArrowLeft width={20} height={20} />
+                <span>選擇其他模型</span>
               </button>
               <div className="chat-title">
                 <span className="model-name">{selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live'}</span>
                 <div className="connection-status">
-                  <div className={`status-dot ${isListening ? 'listening' : ''}`} />
+                  <div className={`status-dot ${isListening ? 'listening' : ''}`} aria-hidden />
                   <span className={isListening ? 'listening-text' : ''}>
-                    {isConnected ? (isPaused ? '⏸ 已暫停' : isListening ? '🎤 聆聽中…' : '🔇 未聆聽') : '已掛斷'}
+                    {isConnected
+                      ? isPaused
+                        ? <>
+                            <IconPause width={14} height={14} />
+                            已暫停
+                          </>
+                        : isListening
+                          ? <>
+                              <IconMic width={14} height={14} />
+                              聆聽中…
+                            </>
+                          : <>
+                              <IconMicOff width={14} height={14} />
+                              未聆聽
+                            </>
+                      : '已掛斷'}
                   </span>
                 </div>
               </div>
               <div className="chat-controls">
                 <ThemeToggle />
                 {isConnected && supportsPause && (
-                  <button type="button" className="btn-pause" onClick={handlePauseToggle}>
-                    {isPaused ? '🎤 取消靜音' : '🔇 靜音'}
+                  <button type="button" className="btn-pause" onClick={handlePauseToggle} aria-label={isPaused ? '取消靜音' : '靜音'}>
+                    {isPaused ? <IconMic width={18} height={18} /> : <IconMicOff width={18} height={18} />}
+                    <span>{isPaused ? '取消靜音' : '靜音'}</span>
                   </button>
                 )}
                 {isConnected && (
-                  <button type="button" className="btn-disconnect" onClick={handleDisconnect}>
-                    掛斷
+                  <button type="button" className="btn-disconnect" onClick={handleDisconnect} aria-label="掛斷">
+                    <IconPhoneOff width={18} height={18} />
+                    <span>掛斷</span>
                   </button>
                 )}
               </div>
@@ -337,7 +356,9 @@ function App() {
             
             <div className="chat-footer">
               <div className="text-input-section">
+                <label htmlFor="chat-text-input" className="sr-only">輸入文字消息</label>
                 <input
+                  id="chat-text-input"
                   type="text"
                   className="text-input"
                   placeholder="輸入文字消息..."
@@ -345,25 +366,30 @@ function App() {
                   onChange={(e) => setTextInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   disabled={!isConnected || isSendingText}
+                  aria-label="輸入文字消息"
                 />
                 <button
                   type="button"
                   className="btn-send-text"
                   onClick={handleSendText}
                   disabled={!isConnected || isSendingText || !textInput.trim()}
+                  aria-label={isSendingText ? '發送中' : '發送'}
                 >
-                  {isSendingText ? '發送中...' : '發送'}
+                  <IconSend width={20} height={20} />
+                  <span>{isSendingText ? '發送中...' : '發送'}</span>
                 </button>
               </div>
               <div className="test-audio-section">
                 <label className="test-audio-label">
-                  <span>測試音檔：</span>
+                  <IconUpload width={18} height={18} />
+                  <span>測試音檔</span>
                   <input
                     ref={testAudioInputRef}
                     type="file"
                     accept="audio/*"
                     className="test-audio-input"
                     disabled={testAudioSending || !isConnected}
+                    aria-label="選擇音檔"
                   />
                 </label>
                 <button
@@ -371,6 +397,7 @@ function App() {
                   className="btn-send-test-audio"
                   onClick={handleSendTestAudio}
                   disabled={testAudioSending || !isConnected}
+                  aria-label={testAudioSending ? '傳送中' : '傳送音檔'}
                 >
                   {testAudioSending ? '傳送中…' : '傳送'}
                 </button>
