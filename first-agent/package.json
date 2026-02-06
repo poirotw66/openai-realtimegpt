@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "mcp-server": "node mcp-proxy-server.js",
     "gemini-backend": "python gemini_backend.py",
-    "dev-full": "concurrently \"npm run mcp-server\" \"npm run gemini-backend\" \"npm run dev\""
+    "email-mcp": "cd ../mcp_sent_mail && python server.py",
+    "dev-full": "concurrently \"npm run mcp-server\" \"npm run gemini-backend\" \"npm run email-mcp\" \"npm run dev\""
   },
   "dependencies": {
     "@openai/agents-realtime": "^0.1.0",

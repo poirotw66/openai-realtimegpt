@@ -32,19 +32,203 @@ const uvPath = '/Users/cfh00896102/.local/bin/uv';
 
 const mcpServers = {
   grounding: {
+    type: 'stdio',
     path: path.resolve('..', 'grounding-mcp'),
     command: ['run', 'python', 'grounding_mcp/server.py'],
     tools: ['grounded_search']
   },
   rag: {
+    type: 'stdio',
     path: path.resolve('..', 'mcp_rag_server'),
     command: ['run', 'python', 'server.py'],
     tools: ['ask_m365_question', 'search_knowledge_base', 'get_page_context']
   }
 };
 
-// Function to call a specific MCP server
+// Add email MCP server if enabled (default: enabled, set EMAIL_MCP_DISABLED=true to disable)
+if (!process.env.EMAIL_MCP_DISABLED) {
+  // Default to local server if EMAIL_MCP_URL not set (for npm run dev-full integration)
+  const defaultEmailMCPUrl = process.env.EMAIL_MCP_URL || 'http://localhost:8080/mcp';
+  mcpServers.email = {
+    type: 'http-streamable',
+    url: defaultEmailMCPUrl,
+    tools: ['send_email', 'send_halloween_invitation', 'send_system_alert']
+  };
+  console.log(`📧 Email MCP server configured: ${defaultEmailMCPUrl}`);
+} else {
+  console.log('ℹ️  Email MCP server disabled (EMAIL_MCP_DISABLED=true)');
+}
+
+// Helper function to parse SSE (Server-Sent Events) response
+function parseSSEResponse(text) {
+  const lines = text.split('\n');
+  let eventType = null;
+  let data = null;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue; // Skip empty lines
+    
+    if (trimmed.startsWith('event:')) {
+      eventType = trimmed.substring(6).trim();
+    } else if (trimmed.startsWith('data:')) {
+      const dataStr = trimmed.substring(5).trim();
+      if (dataStr) {
+        try {
+          data = JSON.parse(dataStr);
+        } catch (e) {
+          // If not JSON, use as-is
+          data = dataStr;
+        }
+      }
+    }
+  }
+  
+  return { eventType, data };
+}
+
+// Function to call HTTP Streamable MCP server
+// For stateless Streamable HTTP, each request needs initialize → initialized → method call sequence
+// But since we can't send multiple messages in one HTTP request, we'll use a session-based approach
+// by sending initialize/initialized first, then the method call in a separate request
+async function callHTTPStreamableMCPServer(serverConfig, method, params = {}) {
+  const baseUrl = serverConfig.url.endsWith('/') ? serverConfig.url : `${serverConfig.url}/`;
+  
+  try {
+    // Step 1: Initialize (required for each session)
+    const initResponse = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'first-agent', version: '1.0.0' },
+        },
+      }),
+    });
+
+    if (!initResponse.ok) {
+      throw new Error(`HTTP error during initialize! status: ${initResponse.status}`);
+    }
+
+    // Parse response (could be JSON or SSE format)
+    const initText = await initResponse.text();
+    let initData = null;
+    if (initText.trim().startsWith('event:') || initText.includes('data:')) {
+      const parsed = parseSSEResponse(initText);
+      initData = parsed.data;
+    } else {
+      try {
+        initData = JSON.parse(initText);
+      } catch (e) {
+        throw new Error(`Failed to parse initialize response: ${e.message}`);
+      }
+    }
+
+    if (initData?.error) {
+      throw new Error(`MCP Initialize Error: ${initData.error.message || JSON.stringify(initData.error)}`);
+    }
+
+    // Step 2: Send initialized notification
+    await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    });
+
+    // Step 3: Call the actual method
+    let requestBody;
+    if (method === 'tools/list') {
+      requestBody = {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {},
+      };
+    } else if (method === 'tools/call') {
+      requestBody = {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: params,
+      };
+    } else {
+      throw new Error(`Unknown method: ${method}`);
+    }
+
+    console.log(`🔧 Calling HTTP Streamable MCP server at ${baseUrl}:`, method, params);
+
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ HTTP error response (${response.status}): ${errorText.substring(0, 200)}`);
+      if (response.status === 404) {
+        throw new Error(`Email MCP server not found at ${baseUrl}. The service may not be deployed or the URL is incorrect.`);
+      }
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText.substring(0, 200)}`);
+    }
+
+    // Parse response (could be JSON or SSE format)
+    const responseText = await response.text();
+    let data = null;
+    
+    if (responseText.trim().startsWith('event:') || responseText.includes('data:')) {
+      // SSE format
+      const parsed = parseSSEResponse(responseText);
+      data = parsed.data;
+    } else {
+      // Pure JSON format
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`Failed to parse response: ${e.message}, response: ${responseText.substring(0, 200)}`);
+      }
+    }
+
+    if (!data) {
+      throw new Error('No valid response data found');
+    }
+
+    if (data.error) {
+      throw new Error(`MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+
+    return data.result || {};
+  } catch (error) {
+    console.error(`❌ Error calling HTTP Streamable MCP server:`, error);
+    throw error;
+  }
+}
+
+// Function to call a specific MCP server (stdio or HTTP Streamable)
 async function callSpecificMCPServer(serverConfig, method, params = {}) {
+  // Handle HTTP Streamable MCP servers
+  if (serverConfig.type === 'http-streamable') {
+    return await callHTTPStreamableMCPServer(serverConfig, method, params);
+  }
+
+  // Handle stdio MCP servers (existing implementation)
   return new Promise((resolve, reject) => {
     const requests = [];
     requests.push(JSON.stringify({
@@ -139,14 +323,27 @@ app.get('/api/mcp/tools', async (req, res) => {
   try {
     console.log('📡 GET /api/mcp/tools - Listing available tools from all servers');
     
-    const toolPromises = Object.values(mcpServers).map(serverConfig => 
-      callSpecificMCPServer(serverConfig, 'tools/list')
-    );
+    const toolPromises = Object.entries(mcpServers).map(async ([serverName, serverConfig]) => {
+      try {
+        const result = await callSpecificMCPServer(serverConfig, 'tools/list');
+        console.log(`✅ ${serverName} (${serverConfig.type || 'stdio'}): ${(result.tools || []).length} tools`);
+        return result;
+      } catch (error) {
+        const serverType = serverConfig.type || 'stdio';
+        const serverUrl = serverConfig.url || serverConfig.path || 'unknown';
+        console.error(`⚠️ Failed to list tools from ${serverName} (${serverType}):`, error.message);
+        console.error(`   Server: ${serverUrl}`);
+        if (serverType === 'http-streamable') {
+          console.error(`   💡 Tip: Ensure the email MCP server is deployed and accessible at ${serverUrl}`);
+        }
+        return { tools: [] }; // Return empty tools on error to allow other servers to work
+      }
+    });
 
     const results = await Promise.all(toolPromises);
     const allTools = results.flatMap(result => result.tools || []);
 
-    console.log('✅ All tools listed successfully:', allTools);
+    console.log('✅ All tools listed successfully:', allTools.map((t) => t.name));
     res.json({
       success: true,
       tools: allTools
@@ -389,6 +586,14 @@ server.listen(PORT, () => {
   console.log('  WS   /ws/gemini-live - Gemini Live API WebSocket proxy (Vertex AI, uses ADC)');
   console.log('  GET  /api/mcp/tools - List available MCP tools');
   console.log('  POST /api/mcp/tools/call - Call MCP tool');
+  console.log('');
+  console.log('📧 MCP Servers configured:');
+  Object.entries(mcpServers).forEach(([name, config]) => {
+    const serverInfo = config.type === 'http-streamable' 
+      ? `${config.type} (${config.url})`
+      : `${config.type} (${config.path})`;
+    console.log(`  - ${name}: ${serverInfo}`);
+  });
 });
 
 export default app;

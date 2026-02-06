@@ -1,13 +1,19 @@
 import { groundingMCPClient } from './httpGroundingClient.js';
 
+/**
+ * Unified MCP Server wrapper that connects to the proxy server
+ * The proxy server handles all MCP servers (stdio and HTTP Streamable)
+ * including grounding, rag, and email MCP servers.
+ */
 export class GroundingMCPServer {
   private isConnected: boolean = false;
 
   async connect(): Promise<void> {
     try {
+      // Connect to proxy server which handles all MCP servers
       await groundingMCPClient.connect();
       this.isConnected = true;
-      console.log('🔌 MCP Server wrapper connected');
+      console.log('🔌 MCP Server wrapper connected (via proxy - supports all MCP servers)');
     } catch (error) {
       console.error('❌ Failed to connect MCP Server wrapper:', error);
       throw error;
@@ -30,8 +36,9 @@ export class GroundingMCPServer {
     }
 
     try {
+      // Proxy server aggregates tools from all MCP servers (grounding, rag, email)
       const toolsResult = await groundingMCPClient.listTools();
-      console.log('🔧 Available MCP tools:', toolsResult);
+      console.log('🔧 Available MCP tools from proxy:', toolsResult);
       
       // Transform MCP tools to Realtime API format
       const tools = toolsResult.tools?.map((tool: any) => ({
@@ -40,7 +47,7 @@ export class GroundingMCPServer {
         description: tool.description,
         parameters: tool.inputSchema,
         invoke: async (_runContext: any, input: string) => {
-          console.log(`🔧 Invoking MCP tool: ${tool.name}`, input);
+          console.log(`🔧 Invoking MCP tool via proxy: ${tool.name}`, input);
           
           let params = {};
           try {
@@ -53,7 +60,18 @@ export class GroundingMCPServer {
           
           try {
             const result = await groundingMCPClient.callTool(tool.name, params);
-            return result.content || result;
+            // Handle different result formats
+            if (typeof result === 'string') {
+              return result;
+            } else if (result?.content) {
+              return result.content;
+            } else if (result?.message) {
+              return result.message;
+            } else if (result?.text) {
+              return result.text;
+            } else {
+              return JSON.stringify(result, null, 2);
+            }
           } catch (error) {
             console.error(`❌ Error calling MCP tool ${tool.name}:`, error);
             return {
