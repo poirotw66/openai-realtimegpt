@@ -70,12 +70,13 @@ async function callSpecificMCPServer(serverConfig, method, params = {}) {
     console.log(`🔧 Calling MCP server at ${serverConfig.path}:`, method, params);
     console.log('📨 Sending requests:', requests);
 
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const child = spawn(uvPath, serverConfig.command, {
       cwd: serverConfig.path,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        GEMINI_API_KEY: 'AIzaSyC5lKSpC33Bm1lJmMFuaSfA_0viHJqiWek'
+        ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {})
       }
     });
 

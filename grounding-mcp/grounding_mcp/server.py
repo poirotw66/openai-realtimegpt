@@ -94,7 +94,7 @@ class GroundingSearchServer:
         try:
             # Make the request to GenAI with grounding
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.0-flash",
                 contents=query,
                 config=self.config,
             )
