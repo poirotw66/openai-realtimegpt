@@ -168,7 +168,6 @@ export async function connectSession(apiKey?: string | null) {
     // Expose function to track current response ID
     (window as any).setCurrentResponseId = (id: string | null) => {
         currentResponseId = id;
-        console.log('🔔 Response ID updated:', id);
     };
 
     // Trigger initial greeting: send a minimal message so the model says "Hello~ What can I help you?"
@@ -287,127 +286,80 @@ export async function sendTextMessage(text: string): Promise<void> {
 
   try {
     // Step 1: Cancel any in-progress response to interrupt current speech
-    console.log('🛑 Attempting to cancel current response before sending text...');
-    console.log('📋 Current response ID:', currentResponseId);
-    console.log('🔍 Session methods:', Object.getOwnPropertyNames(sessionAny));
-    console.log('🔍 Session prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(sessionAny)));
-    
+    // According to OpenAI Realtime API, sending a new message should automatically interrupt
+    // But we explicitly cancel to ensure it works reliably
     let cancelSent = false;
     
-    // Method 1: Try sessionAny.send (direct client events)
-    if (typeof sessionAny.send === 'function') {
-      try {
-        const cancelEvent: any = { type: 'response.cancel' };
-        if (currentResponseId) {
-          cancelEvent.response_id = currentResponseId;
+    // Try multiple methods to cancel response, prioritizing most reliable approaches
+    const cancelMethods = [
+      // Method 1: Direct send (if available)
+      () => {
+        if (typeof sessionAny.send === 'function') {
+          const cancelEvent: any = { type: 'response.cancel' };
+          if (currentResponseId) {
+            cancelEvent.response_id = currentResponseId;
+          }
+          sessionAny.send(cancelEvent);
+          return true;
         }
-        sessionAny.send(cancelEvent);
-        cancelSent = true;
-        console.log('✅ Sent response.cancel via sessionAny.send');
-      } catch (e) {
-        console.warn('⚠️ Failed via sessionAny.send:', e);
-      }
-    }
-    
-    // Method 2: Try through realtime object
-    if (!cancelSent && sessionAny.realtime) {
-      console.log('🔍 Realtime object methods:', Object.getOwnPropertyNames(sessionAny.realtime));
-      
-      if (typeof sessionAny.realtime.send === 'function') {
-        try {
+        return false;
+      },
+      // Method 2: Through realtime object
+      () => {
+        if (sessionAny.realtime?.send) {
           const cancelEvent: any = { type: 'response.cancel' };
           if (currentResponseId) {
             cancelEvent.response_id = currentResponseId;
           }
           sessionAny.realtime.send(cancelEvent);
-          cancelSent = true;
-          console.log('✅ Sent response.cancel via realtime.send');
-        } catch (e) {
-          console.warn('⚠️ Failed via realtime.send:', e);
+          return true;
         }
-      }
-      
-      // Try sendClientEvent if available
-      if (!cancelSent && typeof sessionAny.realtime.sendClientEvent === 'function') {
-        try {
-          sessionAny.realtime.sendClientEvent({ type: 'response.cancel' });
-          cancelSent = true;
-          console.log('✅ Sent response.cancel via realtime.sendClientEvent');
-        } catch (e) {
-          console.warn('⚠️ Failed via realtime.sendClientEvent:', e);
-        }
-      }
-    }
-    
-    // Method 3: Try through transport layer
-    if (!cancelSent && sessionAny.transport) {
-      console.log('🔍 Transport object methods:', Object.getOwnPropertyNames(sessionAny.transport));
-      
-      if (typeof sessionAny.transport.send === 'function') {
-        try {
-          const cancelEvent: any = { type: 'response.cancel' };
-          if (currentResponseId) {
-            cancelEvent.response_id = currentResponseId;
-          }
-          sessionAny.transport.send(cancelEvent);
-          cancelSent = true;
-          console.log('✅ Sent response.cancel via transport.send');
-        } catch (e) {
-          console.warn('⚠️ Failed via transport.send:', e);
-        }
-      }
-    }
-    
-    // Method 4: Try cancelResponse or interrupt methods
-    if (!cancelSent) {
-      if (typeof sessionAny.cancelResponse === 'function') {
-        try {
+        return false;
+      },
+      // Method 3: cancelResponse method (if available)
+      () => {
+        if (typeof sessionAny.cancelResponse === 'function') {
           sessionAny.cancelResponse();
-          cancelSent = true;
-          console.log('✅ Called cancelResponse()');
-        } catch (e) {
-          console.warn('⚠️ Failed via cancelResponse:', e);
+          return true;
         }
-      }
-      
-      if (!cancelSent && typeof sessionAny.interrupt === 'function') {
-        try {
+        return false;
+      },
+      // Method 4: interrupt method (if available)
+      () => {
+        if (typeof sessionAny.interrupt === 'function') {
           sessionAny.interrupt();
-          cancelSent = true;
-          console.log('✅ Called interrupt()');
-        } catch (e) {
-          console.warn('⚠️ Failed via interrupt:', e);
+          return true;
         }
+        return false;
       }
-    }
+    ];
     
-    if (cancelSent) {
-      // Wait for cancel to be processed
-      await new Promise(resolve => setTimeout(resolve, 300));
-      currentResponseId = null;
-    } else {
-      console.warn('⚠️ Could not find method to cancel response');
-      console.log('💡 Trying to interrupt by clearing audio buffer...');
-      
-      // Last resort: Try to clear audio buffer through sendMessage with empty text
-      // This might trigger interruption
+    // Try each cancellation method
+    for (const method of cancelMethods) {
       try {
-        if (typeof sessionAny.sendMessage === 'function') {
-          // Send empty message first to potentially interrupt
-          sessionAny.sendMessage('');
-          await new Promise(resolve => setTimeout(resolve, 100));
+        if (method()) {
+          cancelSent = true;
+          break;
         }
       } catch (e) {
-        console.warn('⚠️ Failed to send empty message:', e);
+        // Continue to next method if this one fails
+        continue;
       }
+    }
+    
+    // Wait briefly for cancellation to process if we sent a cancel signal
+    if (cancelSent) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      currentResponseId = null;
     }
     
     // Step 2: Send the new user text message
+    // Note: According to OpenAI docs, sendMessage should automatically interrupt ongoing responses
+    // But we've already attempted cancellation above for extra reliability
     sessionAny.sendMessage(text);
-    console.log('📤 Sent text message:', text.substring(0, 50));
   } catch (error) {
-    console.error('❌ Failed to send text message:', error);
-    throw error;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send text message: ${errorMessage}`);
   }
 }
 

@@ -14,8 +14,10 @@ import {
 import WelcomePage from './components/WelcomePage';
 import ModelSelection from './components/ModelSelection';
 import ConversationView from './components/ConversationView';
+import ConversationHistory from './components/ConversationHistory';
 import ThemeToggle from './components/ThemeToggle';
 import { IconArrowLeft, IconMic, IconMicOff, IconPause, IconPhoneOff, IconSend, IconUpload } from './components/Icons';
+import { saveConversation, createConversation, type Conversation } from './utils/conversationHistory';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -25,7 +27,7 @@ interface Message {
   messageId?: string;
 }
 
-type AppView = 'welcome' | 'model-selection' | 'connecting' | 'chat';
+type AppView = 'welcome' | 'model-selection' | 'connecting' | 'chat' | 'history';
 type SelectedModel = 'gpt-realtime' | 'gemini-live' | null;
 
 function App() {
@@ -43,6 +45,7 @@ function App() {
   const testAudioInputRef = useRef<HTMLInputElement>(null);
 
   const messageHandlerRef = useRef<(message: Message, messageId?: string) => void>(() => {});
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const handler = (message: Message, messageId?: string) => {
@@ -67,7 +70,22 @@ function App() {
           return newMessages;
         }
         // Add new final message at the end
-        return [...prev, { ...message, messageId: id, isStreaming: false }];
+        const newMessages = [...prev, { ...message, messageId: id, isStreaming: false }];
+        
+        // Auto-save conversation when new message is added (only if connected and not streaming)
+        if (isConnected && selectedModel && newMessages.length > 0 && !message.isStreaming) {
+          // Clear previous timeout
+          if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+          }
+          // Debounce saves to avoid saving on every message update
+          saveTimeoutRef.current = setTimeout(() => {
+            const conversation = createConversation(newMessages, selectedModel);
+            saveConversation(conversation);
+          }, 2000);
+        }
+        
+        return newMessages;
       });
     };
     messageHandlerRef.current = handler;
@@ -76,8 +94,11 @@ function App() {
     // Cleanup function to prevent duplicate callbacks
     return () => {
       setMessageCallback(null);
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
     };
-  }, []);
+  }, [isConnected, selectedModel]);
 
   const handleStartChat = () => {
     setCurrentView('model-selection');
@@ -95,8 +116,41 @@ function App() {
   };
 
   const handleBackToModelSelection = () => {
-    setCurrentView('model-selection');
-    handleDisconnect();
+    // If viewing history conversation, go back to history instead
+    if (messages.length > 0 && !isConnected) {
+      setCurrentView('history');
+      setMessages([]);
+      setSelectedModel(null);
+    } else {
+      setCurrentView('model-selection');
+      handleDisconnect();
+    }
+  };
+
+  const handleShowHistory = () => {
+    setCurrentView('history');
+  };
+
+  const handleLoadConversation = (conversation: Conversation) => {
+    // Convert conversation messages to Message format
+    const loadedMessages: Message[] = conversation.messages.map(msg => ({
+      ...msg,
+      isStreaming: false,
+      timestamp: new Date(msg.timestamp) // Ensure timestamp is a Date object
+    }));
+    
+    // Set the loaded messages and model
+    setMessages(loadedMessages);
+    setSelectedModel(conversation.model);
+    
+    // Go directly to chat view to show the loaded conversation
+    setCurrentView('chat');
+    setIsConnected(false);
+    setIsListening(false);
+    setIsPaused(false);
+    
+    // Note: User can view the conversation history without connecting
+    // To continue the conversation, they need to reconnect
   };
 
   const handleConnect = async (model: 'gpt-realtime' | 'gemini-live', apiKey?: string, projectId?: string) => {
@@ -273,7 +327,7 @@ function App() {
             <div className="theme-toggle-container">
               <ThemeToggle />
             </div>
-            <WelcomePage onStartChat={handleStartChat} />
+            <WelcomePage onStartChat={handleStartChat} onShowHistory={handleShowHistory} />
           </div>
         );
       
@@ -301,16 +355,36 @@ function App() {
           </div>
         );
       
+      case 'history':
+        return (
+          <div className="history-wrapper">
+            <div className="theme-toggle-container">
+              <ThemeToggle />
+            </div>
+            <ConversationHistory 
+              onBack={() => setCurrentView('welcome')}
+              onLoadConversation={handleLoadConversation}
+            />
+          </div>
+        );
+      
       case 'chat':
         return (
           <div className="chat-view">
             <div className="chat-header">
               <button type="button" className="back-btn" onClick={handleBackToModelSelection} aria-label="選擇其他模型">
                 <IconArrowLeft width={20} height={20} />
-                <span>選擇其他模型</span>
+                <span>{isConnected ? '選擇其他模型' : messages.length > 0 ? '返回' : '選擇其他模型'}</span>
               </button>
               <div className="chat-title">
-                <span className="model-name">{selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live'}</span>
+                <span className="model-name">
+                  {selectedModel 
+                    ? (selectedModel === 'gpt-realtime' ? 'GPT Realtime' : 'Gemini Live')
+                    : '歷史對話'}
+                  {messages.length > 0 && !isConnected && (
+                    <span className="history-badge">歷史記錄</span>
+                  )}
+                </span>
                 <div className="connection-status">
                   <div className={`status-dot ${isListening ? 'listening' : ''}`} aria-hidden />
                   <span className={isListening ? 'listening-text' : ''}>
@@ -329,7 +403,9 @@ function App() {
                               <IconMicOff width={14} height={14} />
                               未聆聽
                             </>
-                      : '已掛斷'}
+                      : messages.length > 0
+                        ? '歷史對話'
+                        : '已掛斷'}
                   </span>
                 </div>
               </div>
@@ -405,7 +481,9 @@ function App() {
               <p className="chat-hint">
                 {isConnected
                   ? '可直接對麥克風說話、輸入文字，或上傳音檔。'
-                  : '連接已中斷'}
+                  : messages.length > 0
+                    ? '這是載入的歷史對話。點擊「選擇其他模型」重新連接以繼續對話。'
+                    : '連接已中斷'}
               </p>
             </div>
           </div>

@@ -194,11 +194,6 @@ async def websocket_endpoint(websocket: WebSocket):
         # Enable Google Search grounding (same as GPT Realtime grounded_search tool)
         tools = [types.Tool(google_search=types.GoogleSearch())] + email_tools
         
-        # Log tools configuration for debugging
-        logger.info(f"🔧 Configured {len(tools)} tools:")
-        logger.info(f"  - Google Search (built-in)")
-        logger.info(f"  - Email tools: send_email, send_halloween_invitation, send_system_alert")
-        
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             speech_config=types.SpeechConfig(
@@ -302,17 +297,16 @@ async def websocket_endpoint(websocket: WebSocket):
                             tool_call = getattr(response, "tool_call", None)
                             if tool_call:
                                 function_calls = getattr(tool_call, "function_calls", None) or []
-                                logger.info(f"🔧 Tool call detected with {len(function_calls)} function calls")
+                                logger.info(f"Tool call detected: {len(function_calls)} function(s)")
                                 
                                 for fc in function_calls:
                                     name = getattr(fc, "name", None) or "(unknown)"
                                     args = getattr(fc, "args", None) or {}
-                                    logger.info(f"✅ Function call: {name} with args: {json.dumps(args, ensure_ascii=False)}")
                                     
                                     # Handle email tool calls via MCP proxy
                                     if name in ["send_email", "send_halloween_invitation", "send_system_alert"]:
                                         try:
-                                            logger.info(f"🔧 Processing email tool call: {name} with args: {json.dumps(args, ensure_ascii=False)}")
+                                            logger.info(f"Processing email tool: {name}")
                                             async with httpx.AsyncClient(timeout=30.0) as http_client:
                                                 http_response = await http_client.post(
                                                     f"{MCP_PROXY_URL}/api/mcp/tools/call",
@@ -321,32 +315,35 @@ async def websocket_endpoint(websocket: WebSocket):
                                                         "arguments": args
                                                     }
                                                 )
+                                                http_response.raise_for_status()
                                                 result = http_response.json()
-                                                logger.info(f"📧 MCP proxy response for {name}: {json.dumps(result, ensure_ascii=False)}")
                                                 
                                                 if result.get("success"):
                                                     tool_result = result.get("result", {})
-                                                    result_text = json.dumps(tool_result, ensure_ascii=False, indent=2)
-                                                    logger.info(f"✅ Email tool {name} succeeded: {result_text}")
+                                                    logger.info(f"Email tool {name} succeeded")
                                                     
-                                                    # Send function response back to Gemini Live using send_tool_response
                                                     function_response = types.FunctionResponse(
                                                         name=name,
                                                         response=tool_result
                                                     )
-                                                    logger.info(f"📤 Sending tool response for {name} to Gemini Live...")
                                                     await session.send_tool_response(function_responses=[function_response])
-                                                    logger.info(f"✅ Successfully sent tool response for {name}")
                                                 else:
                                                     error_msg = result.get("error", "Unknown error")
-                                                    logger.error(f"❌ Email tool {name} failed: {error_msg}")
+                                                    logger.error(f"Email tool {name} failed: {error_msg}")
                                                     function_response = types.FunctionResponse(
                                                         name=name,
                                                         response={"success": False, "error": error_msg}
                                                     )
                                                     await session.send_tool_response(function_responses=[function_response])
+                                        except httpx.HTTPError as e:
+                                            logger.error(f"HTTP error calling email tool {name}: {e}")
+                                            function_response = types.FunctionResponse(
+                                                name=name,
+                                                response={"success": False, "error": f"Network error: {str(e)}"}
+                                            )
+                                            await session.send_tool_response(function_responses=[function_response])
                                         except Exception as e:
-                                            logger.error(f"❌ Error calling email tool {name}: {e}", exc_info=True)
+                                            logger.error(f"Error calling email tool {name}: {e}", exc_info=True)
                                             function_response = types.FunctionResponse(
                                                 name=name,
                                                 response={"success": False, "error": str(e)}
@@ -362,92 +359,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                     await event_queue.put({"setup_complete": True})
                                 
                                 if server_content.model_turn:
-                                    # Log all parts for debugging
-                                    logger.info(f"📦 Model turn received with {len(server_content.model_turn.parts)} parts")
-                                    
-                                    # Process parts and collect function calls
-                                    function_calls_to_handle = []
-                                    for idx, part in enumerate(server_content.model_turn.parts):
-                                        logger.info(f"🔍 Processing part {idx}: {type(part).__name__}")
-                                        logger.info(f"   Part attributes: {dir(part)}")
-                                        
-                                        # Try multiple ways to get function_call
-                                        fc = None
-                                        if hasattr(part, "function_call"):
-                                            fc = part.function_call
-                                            logger.info(f"   Found function_call via function_call attribute")
-                                        elif hasattr(part, "functionCall"):
-                                            fc = part.functionCall
-                                            logger.info(f"   Found function_call via functionCall attribute")
-                                        elif hasattr(part, "function_call_response"):
-                                            logger.info(f"   Part has function_call_response (this is a response, not a call)")
-                                        
-                                        if fc:
-                                            name = getattr(fc, "name", None) or "(unknown)"
-                                            args = getattr(fc, "args", None) or {}
-                                            args_preview = str(args)[:200] if args is not None else None
-                                            logger.info(
-                                                "✅ Gemini Live tool call detected: name=%s args=%s",
-                                                name,
-                                                args_preview,
-                                            )
-                                            function_calls_to_handle.append((name, args))
-                                        
-                                        # Check for text content
-                                        if hasattr(part, "text") and part.text:
-                                            logger.info(f"   Part has text: {part.text[:100]}...")
-                                        
-                                        # Always process audio output regardless of function calls
+                                    # Process parts and handle audio output
+                                    for part in server_content.model_turn.parts:
+                                        # Process audio output
                                         if hasattr(part, "inline_data") and part.inline_data:
-                                            logger.info(f"   Part has inline_data (audio)")
                                             await audio_output_callback(part.inline_data.data)
-                                    
-                                    logger.info(f"📋 Collected {len(function_calls_to_handle)} function calls to handle")
-                                    
-                                    # Handle email tool calls synchronously (required for proper response flow)
-                                    for name, args in function_calls_to_handle:
-                                        if name in ["send_email", "send_halloween_invitation", "send_system_alert"]:
-                                            try:
-                                                logger.info(f"🔧 Processing email tool call: {name} with args: {json.dumps(args, ensure_ascii=False)}")
-                                                async with httpx.AsyncClient(timeout=30.0) as http_client:
-                                                    response = await http_client.post(
-                                                        f"{MCP_PROXY_URL}/api/mcp/tools/call",
-                                                        json={
-                                                            "name": name,
-                                                            "arguments": args
-                                                        }
-                                                    )
-                                                    result = response.json()
-                                                    logger.info(f"📧 MCP proxy response for {name}: {json.dumps(result, ensure_ascii=False)}")
-                                                    
-                                                    if result.get("success"):
-                                                        tool_result = result.get("result", {})
-                                                        result_text = json.dumps(tool_result, ensure_ascii=False, indent=2)
-                                                        logger.info(f"✅ Email tool {name} succeeded: {result_text}")
-                                                        
-                                                        # Send function response back to Gemini Live using send_tool_response
-                                                        function_response = types.FunctionResponse(
-                                                            name=name,
-                                                            response=tool_result
-                                                        )
-                                                        logger.info(f"📤 Sending tool response for {name} to Gemini Live...")
-                                                        await session.send_tool_response(function_responses=[function_response])
-                                                        logger.info(f"✅ Successfully sent tool response for {name}")
-                                                    else:
-                                                        error_msg = result.get("error", "Unknown error")
-                                                        logger.error(f"❌ Email tool {name} failed: {error_msg}")
-                                                        function_response = types.FunctionResponse(
-                                                            name=name,
-                                                            response={"success": False, "error": error_msg}
-                                                        )
-                                                        await session.send_tool_response(function_responses=[function_response])
-                                            except Exception as e:
-                                                logger.error(f"❌ Error calling email tool {name}: {e}", exc_info=True)
-                                                function_response = types.FunctionResponse(
-                                                    name=name,
-                                                    response={"success": False, "error": str(e)}
-                                                )
-                                                await session.send_tool_response(function_responses=[function_response])
                                 # Log grounding metadata when model uses e.g. Google Search
                                 gmd = getattr(server_content, "grounding_metadata", None) or getattr(
                                     server_content, "groundingMetadata", None

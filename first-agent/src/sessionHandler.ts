@@ -206,20 +206,10 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
                 break;
             case 'response.created':
                 assistantMessageId = (event as any).response?.id ?? `assistant-${Date.now()}`;
-                // Track response ID for cancellation - try multiple sources
+                // Track response ID for cancellation
                 const responseId = (event as any).response?.id ?? (event as any).response_id ?? event.response_id;
-                console.log('📝 response.created event:', { 
-                    responseId, 
-                    eventResponseId: (event as any).response?.id,
-                    eventResponse_id: (event as any).response_id,
-                    eventResponseIdDirect: event.response_id,
-                    fullEvent: event 
-                });
                 if (responseId && typeof (window as any).setCurrentResponseId === 'function') {
                     (window as any).setCurrentResponseId(responseId);
-                    console.log('✅ Set current response ID:', responseId);
-                } else {
-                    console.warn('⚠️ Could not set response ID:', { responseId, hasFunction: typeof (window as any).setCurrentResponseId === 'function' });
                 }
                 currentAssistantMessage = '';
                 finalAssistantMessageSentForTurn = false;
@@ -227,7 +217,6 @@ export function setupEventHandlers(session: any, messageCallback: ((message: { r
             case 'response.done':
             case 'response.output_item.done':
                 // Clear response ID when response is done
-                console.log('✅ Response done, clearing response ID');
                 if (typeof (window as any).setCurrentResponseId === 'function') {
                     (window as any).setCurrentResponseId(null);
                 }

@@ -1,7 +1,12 @@
 import React from 'react';
 import { IconMic, IconSpeaker, IconSparkles } from './Icons';
 
-const WelcomePage: React.FC<{ onStartChat: () => void }> = ({ onStartChat }) => {
+interface WelcomePageProps {
+  onStartChat: () => void;
+  onShowHistory?: () => void;
+}
+
+const WelcomePage: React.FC<WelcomePageProps> = ({ onStartChat, onShowHistory }) => {
   return (
     <div className="welcome-page">
       <div className="welcome-container">
@@ -10,9 +15,16 @@ const WelcomePage: React.FC<{ onStartChat: () => void }> = ({ onStartChat }) => 
           <p className="welcome-subtitle">使用 OpenAI Realtime 或 Gemini Live 體驗即時語音對話</p>
         </div>
 
-        <button type="button" className="start-chat-btn" onClick={onStartChat}>
-          開始對話
-        </button>
+        <div className="welcome-actions">
+          <button type="button" className="start-chat-btn" onClick={onStartChat}>
+            開始對話
+          </button>
+          {onShowHistory && (
+            <button type="button" className="view-history-btn" onClick={onShowHistory}>
+              查看對話歷史
+            </button>
+          )}
+        </div>
 
         <div className="chat-preview">
           <div className="message-preview assistant">
