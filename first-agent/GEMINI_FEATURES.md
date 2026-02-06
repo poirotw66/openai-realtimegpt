@@ -43,7 +43,15 @@
 3. 點擊「傳送」按鈕
 4. AI 會轉錄音訊內容並用語音回應
 
-### 3. 即時語音對話 ✅
+### 3. Google Search 搜尋 grounding ✅
+
+與 Realtime GPT 的 grounded_search 相同：啟用後模型可查詢即時資訊（新聞、事實等），回應會以 Google 搜尋結果為依據。
+
+**實作方式：**
+- 在 `gemini_backend.py` 的 `LiveConnectConfig` 中加入 `tools=[types.Tool(google_search=types.GoogleSearch())]`
+- 為內建工具，無需自訂 tool handler；模型會自動呼叫並使用搜尋結果
+
+### 4. 即時語音對話 ✅
 
 支援即時麥克風輸入，使用者說話會即時轉錄並由 AI 回應。
 
@@ -62,6 +70,7 @@
 | 連線後自動打招呼 | ✅ | ✅ |
 | 上傳音訊檔 | ✅ | ✅ |
 | 即時語音對話 | ✅ | ✅ |
+| 搜尋 grounding（Google Search） | ✅ (MCP) | ✅ (built-in tool) |
 | 繁體中文回應 | ✅ | ✅ |
 
 ## 注意事項

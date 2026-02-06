@@ -131,6 +131,8 @@ async def websocket_endpoint(websocket: WebSocket):
     async def run_session():
         client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
         
+        # Enable Google Search grounding (same as GPT Realtime grounded_search tool)
+        tools = [types.Tool(google_search=types.GoogleSearch())]
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             speech_config=types.SpeechConfig(
@@ -140,7 +142,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                 )
             ),
-            system_instruction=types.Content(parts=[types.Part(text="You are a helpful AI assistant. Keep your responses concise and friendly. Respond in Traditional Chinese (繁體中文) when the user speaks Chinese.")]),
+            system_instruction=types.Content(parts=[types.Part(
+                text="You are a helpful AI assistant. Keep responses concise and friendly. Respond in Traditional Chinese (繁體中文) when the user speaks Chinese. "
+                "When the user asks about time, answer in Taiwan time.\n\n"
+                "CRITICAL - Avoid hallucination:\n"
+                "- NEVER invent names, statistics, roster/lineup details, or specific facts. If you are not certain, say so and use Google Search to verify.\n"
+                "- You have Google Search grounding. You MUST use it when: the user asks about rosters/lineups (e.g. national team 30-man list), current events, sports, specific people, or when the user says 查證/確認/去查.\n"
+                "- When the user asks you to verify something (e.g. 去查證、這是誰), always search first, then answer only based on search results. Do not guess or correct with another name you are unsure about.\n"
+                "- If search does not clearly support a name or fact, say you could not verify it or that it may be incorrect; do not substitute with another unverified name."
+            )]),
+            tools=tools,
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
         )
@@ -222,8 +233,25 @@ async def websocket_endpoint(websocket: WebSocket):
                                 
                                 if server_content.model_turn:
                                     for part in server_content.model_turn.parts:
+                                        # Log tool/function calls (e.g. Google Search grounding)
+                                        fc = getattr(part, "function_call", None) or getattr(part, "functionCall", None)
+                                        if fc:
+                                            name = getattr(fc, "name", None) or "(unknown)"
+                                            args = getattr(fc, "args", None)
+                                            args_preview = str(args)[:200] if args is not None else None
+                                            logger.info(
+                                                "Gemini Live tool call: name=%s args=%s",
+                                                name,
+                                                args_preview,
+                                            )
                                         if part.inline_data:
                                             await audio_output_callback(part.inline_data.data)
+                                # Log grounding metadata when model uses e.g. Google Search
+                                gmd = getattr(server_content, "grounding_metadata", None) or getattr(
+                                    server_content, "groundingMetadata", None
+                                )
+                                if gmd:
+                                    logger.info("Gemini Live grounding used: %s", gmd)
                                 
                                 if server_content.input_transcription and server_content.input_transcription.text:
                                     await event_queue.put({
