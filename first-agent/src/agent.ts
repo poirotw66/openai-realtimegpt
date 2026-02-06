@@ -25,6 +25,7 @@ const LANGUAGE_INSTRUCTIONS: Record<DisplayLanguage, string> = {
 // Global variables for agent and session
 let agent: RealtimeAgent | null = null;
 let session: RealtimeSession | null = null;
+let currentResponseId: string | null = null; // Track current active response ID for cancellation
 
 // Initialize MCP server and get additional tools
 async function initializeMCPServer() {
@@ -60,7 +61,10 @@ async function createAgentWithTools() {
 
   agent = new RealtimeAgent({
     name: 'Assistant',
-    instructions: `You are a helpful assistant. ${langInstructions} You have access to tools including get_current_time for time queries and grounded_search for web searches and current information.
+    instructions: `You are a helpful assistant. ${langInstructions} You have access to tools including:
+- get_current_time: for time queries
+- grounded_search: for web searches and current information
+- send_email, send_halloween_invitation, send_system_alert: for sending emails
 
 When the conversation starts (right after the user connects, before they have said anything), greet them first by saying: "${greeting}" Then wait for their response.`,
     tools: allTools
@@ -160,6 +164,12 @@ export async function connectSession(apiKey?: string | null) {
 
     // Setup event handlers
     flushUserMessagesFromSessionHistory = setupEventHandlers(session, messageCallback);
+    
+    // Expose function to track current response ID
+    (window as any).setCurrentResponseId = (id: string | null) => {
+        currentResponseId = id;
+        console.log('🔔 Response ID updated:', id);
+    };
 
     // Trigger initial greeting: send a minimal message so the model says "Hello~ What can I help you?"
     if (typeof sessionAny.sendMessage === 'function') {
@@ -262,9 +272,10 @@ export async function sendAudioFromFile(file: File): Promise<void> {
 
 /**
  * Send text message to OpenAI Realtime API.
- * Cancels any in-progress model response first so the new user message is handled immediately.
+ * Cancels any in-progress model response first, then sends the new text message.
+ * This ensures the model stops speaking and responds to the new text input immediately.
  */
-export function sendTextMessage(text: string): void {
+export async function sendTextMessage(text: string): Promise<void> {
   if (!session) {
     throw new Error('Not connected. Connect first before sending text.');
   }
@@ -275,12 +286,125 @@ export function sendTextMessage(text: string): void {
   }
 
   try {
-    // Interrupt current model speech so the new text is processed without waiting
+    // Step 1: Cancel any in-progress response to interrupt current speech
+    console.log('🛑 Attempting to cancel current response before sending text...');
+    console.log('📋 Current response ID:', currentResponseId);
+    console.log('🔍 Session methods:', Object.getOwnPropertyNames(sessionAny));
+    console.log('🔍 Session prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(sessionAny)));
+    
+    let cancelSent = false;
+    
+    // Method 1: Try sessionAny.send (direct client events)
     if (typeof sessionAny.send === 'function') {
-      sessionAny.send({ type: 'response.cancel' });
+      try {
+        const cancelEvent: any = { type: 'response.cancel' };
+        if (currentResponseId) {
+          cancelEvent.response_id = currentResponseId;
+        }
+        sessionAny.send(cancelEvent);
+        cancelSent = true;
+        console.log('✅ Sent response.cancel via sessionAny.send');
+      } catch (e) {
+        console.warn('⚠️ Failed via sessionAny.send:', e);
+      }
     }
-    // Add user message and trigger new response
+    
+    // Method 2: Try through realtime object
+    if (!cancelSent && sessionAny.realtime) {
+      console.log('🔍 Realtime object methods:', Object.getOwnPropertyNames(sessionAny.realtime));
+      
+      if (typeof sessionAny.realtime.send === 'function') {
+        try {
+          const cancelEvent: any = { type: 'response.cancel' };
+          if (currentResponseId) {
+            cancelEvent.response_id = currentResponseId;
+          }
+          sessionAny.realtime.send(cancelEvent);
+          cancelSent = true;
+          console.log('✅ Sent response.cancel via realtime.send');
+        } catch (e) {
+          console.warn('⚠️ Failed via realtime.send:', e);
+        }
+      }
+      
+      // Try sendClientEvent if available
+      if (!cancelSent && typeof sessionAny.realtime.sendClientEvent === 'function') {
+        try {
+          sessionAny.realtime.sendClientEvent({ type: 'response.cancel' });
+          cancelSent = true;
+          console.log('✅ Sent response.cancel via realtime.sendClientEvent');
+        } catch (e) {
+          console.warn('⚠️ Failed via realtime.sendClientEvent:', e);
+        }
+      }
+    }
+    
+    // Method 3: Try through transport layer
+    if (!cancelSent && sessionAny.transport) {
+      console.log('🔍 Transport object methods:', Object.getOwnPropertyNames(sessionAny.transport));
+      
+      if (typeof sessionAny.transport.send === 'function') {
+        try {
+          const cancelEvent: any = { type: 'response.cancel' };
+          if (currentResponseId) {
+            cancelEvent.response_id = currentResponseId;
+          }
+          sessionAny.transport.send(cancelEvent);
+          cancelSent = true;
+          console.log('✅ Sent response.cancel via transport.send');
+        } catch (e) {
+          console.warn('⚠️ Failed via transport.send:', e);
+        }
+      }
+    }
+    
+    // Method 4: Try cancelResponse or interrupt methods
+    if (!cancelSent) {
+      if (typeof sessionAny.cancelResponse === 'function') {
+        try {
+          sessionAny.cancelResponse();
+          cancelSent = true;
+          console.log('✅ Called cancelResponse()');
+        } catch (e) {
+          console.warn('⚠️ Failed via cancelResponse:', e);
+        }
+      }
+      
+      if (!cancelSent && typeof sessionAny.interrupt === 'function') {
+        try {
+          sessionAny.interrupt();
+          cancelSent = true;
+          console.log('✅ Called interrupt()');
+        } catch (e) {
+          console.warn('⚠️ Failed via interrupt:', e);
+        }
+      }
+    }
+    
+    if (cancelSent) {
+      // Wait for cancel to be processed
+      await new Promise(resolve => setTimeout(resolve, 300));
+      currentResponseId = null;
+    } else {
+      console.warn('⚠️ Could not find method to cancel response');
+      console.log('💡 Trying to interrupt by clearing audio buffer...');
+      
+      // Last resort: Try to clear audio buffer through sendMessage with empty text
+      // This might trigger interruption
+      try {
+        if (typeof sessionAny.sendMessage === 'function') {
+          // Send empty message first to potentially interrupt
+          sessionAny.sendMessage('');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (e) {
+        console.warn('⚠️ Failed to send empty message:', e);
+      }
+    }
+    
+    // Step 2: Send the new user text message
     sessionAny.sendMessage(text);
+    console.log('📤 Sent text message:', text.substring(0, 50));
   } catch (error) {
     console.error('❌ Failed to send text message:', error);
     throw error;

@@ -246,9 +246,9 @@ function App() {
         // Send text to Gemini Live
         sendGeminiText(text);
       } else {
-        // Send to OpenAI Realtime
+        // Send to OpenAI Realtime (cancels current response first)
         const { sendTextMessage } = await import('./agent');
-        sendTextMessage(text);
+        await sendTextMessage(text);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
