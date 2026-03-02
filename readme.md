@@ -1,5 +1,7 @@
 # OpenAI Realtime Voice Assistant
 
+> 本說明與根目錄 `README.md` 內容相同，供大小寫無區分環境使用。
+
 一個基於 OpenAI Realtime API 的智能語音助手，提供類似 ChatGPT 的使用體驗，支援實時語音對話、文字串流顯示，以及深色/淺色模式切換。
 
 ## ✨ 功能特色
@@ -127,24 +129,18 @@ openai-realtimegpt/
 │   │   ├── geminiLive.ts        # Gemini Live 整合
 │   │   ├── App.tsx              # React 主應用
 │   │   ├── theme.tsx            # 主題管理（深色/淺色模式）
-│   │   ├── sessionHandler.ts    # 事件處理和訊息顯示
+│   │   ├── sessionHandler.ts   # 事件處理和訊息顯示
 │   │   ├── components/          # React 元件
-│   │   │   ├── WelcomePage.tsx
-│   │   │   ├── ModelSelection.tsx
-│   │   │   ├── ConversationView.tsx
-│   │   │   ├── ConversationHistory.tsx
-│   │   │   ├── ConnectionView.tsx
-│   │   │   ├── ThemeToggle.tsx
-│   │   │   └── ...
 │   │   ├── tools/               # AI 工具定義
 │   │   └── mcp/                 # MCP 整合（grounding、email 等）
 │   ├── mcp-proxy-server.js     # MCP 代理伺服器
 │   ├── gemini_backend.py       # Gemini Live 後端
 │   └── package.json
-├── grounding-mcp/              # Google Search MCP Server
-├── mcp_rag_server/             # RAG MCP Server
-├── mcp_sent_mail/              # Email MCP Server（可選）
-└── README.md                   # 本檔案
+├── grounding-mcp/              # Google Search MCP Server（stdio）
+├── mcp_rag_server/             # M365 RAG MCP Server（stdio）
+├── mcp_sent_mail/              # Email MCP Server（Streamable HTTP，預設 port 8082）
+├── images/                     # 介面示意圖（README 用）
+└── README.md                   # 專案說明（與本檔案相同）
 ```
 
 ## 🎨 UI/UX 特色
