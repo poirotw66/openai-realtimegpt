@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "mcp-server": "node mcp-proxy-server.js",
     "gemini-backend": "python gemini_backend.py",
-    "email-mcp": "cd ../mcp_sent_mail && python server.py",
+    "email-mcp": "cd ../mcp_sent_mail && PORT=8082 python server.py",
     "dev-full": "concurrently \"npm run mcp-server\" \"npm run gemini-backend\" \"npm run email-mcp\" \"npm run dev\""
   },
   "dependencies": {
