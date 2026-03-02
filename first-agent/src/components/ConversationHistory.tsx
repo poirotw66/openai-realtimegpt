@@ -68,11 +68,12 @@ const ConversationHistory: React.FC<ConversationHistoryProps> = ({
         <div className="conversation-list-panel">
           <div className="conversation-search">
             <input
-              type="text"
+              type="search"
               placeholder="搜尋對話..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="search-input"
+              aria-label="搜尋對話"
             />
           </div>
 
@@ -85,8 +86,17 @@ const ConversationHistory: React.FC<ConversationHistoryProps> = ({
               filteredConversations.map(conv => (
                 <div
                   key={conv.id}
+                  role="button"
+                  tabIndex={0}
                   className={`conversation-item ${selectedId === conv.id ? 'selected' : ''}`}
                   onClick={() => setSelectedId(conv.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedId(conv.id);
+                    }
+                  }}
+                  aria-label={`選擇對話：${conv.title}`}
                 >
                   <div className="conversation-item-header">
                     <h3 className="conversation-title">{conv.title}</h3>

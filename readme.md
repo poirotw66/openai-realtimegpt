@@ -36,6 +36,18 @@
 - **MCP 工具**：支援 Model Context Protocol 工具整合
 - **擴展性**：易於添加新的工具和功能
 
+## 📸 介面預覽
+
+### 模型選擇
+選擇 GPT Realtime 或 Gemini Live，可於卡片上設定 API Key / 專案 ID。
+
+![模型選擇](images/01_selete.png)
+
+### 對話介面
+即時語音與文字串流、連線狀態與控制按鈕。
+
+![對話介面](images/02_chat.png)
+
 ## 🚀 快速開始
 
 ### 前置需求
