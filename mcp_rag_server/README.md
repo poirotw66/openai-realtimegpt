@@ -28,13 +28,15 @@ GOOGLE_API_KEY=your_google_gemini_api_key
 
 ### 3. 確認資料庫路徑
 
-確保 `config.yaml` 中的 ChromaDB 路徑正確指向您的向量資料庫：
+確保 `config.yaml` 中的 ChromaDB 路徑正確指向您的向量資料庫。路徑為**相對於 `mcp_rag_server` 目錄**：
 
 ```yaml
 chroma_config:
-  CHROMA_DIRECTORY: "../chroma_db_all_V2"
+  CHROMA_DIRECTORY: "../chroma_db_all_V2"   # 專案根目錄下的 chroma_db_all_V2
   CHROMA_COLLECTION_NAME: "rag_collection"
 ```
+
+若向量庫位於其他位置，請修改 `CHROMA_DIRECTORY` 為實際路徑。
 
 ## 使用方式
 
@@ -46,14 +48,17 @@ python server.py
 
 ### 作為 MCP Server 使用
 
-配置您的 MCP 客戶端以連接到此 server：
+**在本專案中**：`first-agent` 的 `mcp-proxy-server.js` 會以 **stdio** 方式啟動此 server（路徑為 `openai-realtimegpt/mcp_rag_server`），無需額外設定。
+
+若於其他 MCP 客戶端使用，可配置：
 
 ```json
 {
   "mcpServers": {
     "m365-rag-agent": {
       "command": "python",
-      "args": ["/path/to/mcp_rag_server/server.py"]
+      "args": ["/path/to/openai-realtimegpt/mcp_rag_server/server.py"],
+      "cwd": "/path/to/openai-realtimegpt/mcp_rag_server"
     }
   }
 }
@@ -139,7 +144,7 @@ python server.py
 
 3. **依賴套件問題**
    - 使用 `pip install -r requirements.txt` 重新安裝套件
-   - 注意 pydantic 版本需要是 1.10.12
+   - 若與其他專案共用環境，注意依賴版本相容性
 
 ### 日誌除錯
 

@@ -1,224 +1,129 @@
-# OpenAI Realtime Agent with Tools
+# OpenAI Realtime Voice Assistant（前端與代理）
 
-這是一個使用 OpenAI Realtime API 和 `@openai/agents-realtime` SDK 構建的智能對話系統，支持實時語音對話和工具調用功能。
+本目錄為 **openai-realtimegpt** 主應用的前端與後端代理：React 介面、OpenAI Realtime / Gemini Live 連線，以及 MCP 代理伺服器。
 
-## 🚀 功能特色
+## 功能特色
 
-- **實時語音對話**：支持語音輸入和語音輸出
-- **實時文字串流**：對話內容即時顯示在界面上
-- **工具調用**：AI 可以調用自定義工具（如查詢當前時間）
-- **雙語支持**：中文和英文智能切換
-- **調試功能**：完整的事件監聽和調試面板
+- **雙模型**：GPT Realtime（OpenAI）與 Gemini Live（Vertex AI），於模型選擇頁面切換
+- **實時語音**：語音輸入、語音輸出、轉錄即時顯示
+- **文字輸入**：可輸入文字發送給模型
+- **測試音檔**：上傳音檔模擬語音輸入
+- **對話歷史**：本機儲存與載入對話記錄
+- **深色/淺色模式**：主題切換並持久化
+- **MCP 工具**：透過 `mcp-proxy-server.js` 整合 grounding、RAG、Email 等 MCP Server
 
-## 📋 系統要求
+## 系統需求
 
-- Node.js 16+ 
-- 現代瀏覽器（支持 WebRTC）
-- OpenAI API Key
+- Node.js 16+
+- 現代瀏覽器（支援 WebRTC）
+- OpenAI API Key（GPT Realtime，可由後端 `.env` 提供）
+- 若使用 Gemini Live：Google Cloud 專案 ID 與 `gcloud auth application-default login`
 
-## 🛠️ 安裝與運行
+## 安裝與啟動
 
 ### 1. 安裝依賴
+
 ```bash
+cd first-agent
 npm install
 ```
 
-### 2. 啟動開發服務器
+### 2. 環境變數
+
+複製範例並編輯 `.env`：
+
+```bash
+cp .env.example .env
+```
+
+至少設定（GPT Realtime）：
+
+```
+OPENAI_API_KEY=your_api_key_here
+```
+
+可選：
+
+- **Gemini Live**：`GOOGLE_CLOUD_PROJECT`、`VITE_GOOGLE_CLOUD_PROJECT`，並執行 `gcloud auth application-default login`
+- **Email MCP**：於 `mcp_sent_mail/.env` 設定帳密；或設 `EMAIL_MCP_DISABLED=true` 關閉
+
+### 3. 啟動方式
+
+**僅前端（需後端與 MCP 另行啟動）：**
+
 ```bash
 npm run dev
 ```
 
-### 3. 開啟瀏覽器
-打開 http://localhost:5173/
+**完整環境（推薦）：** 同時啟動 MCP 代理、Gemini 後端、Email MCP、前端
 
-### 4. 配置 API Key
-在界面中輸入你的 OpenAI API Key 並點擊連接
-
-## 🔧 工具配置
-
-### 當前可用工具
-
-#### `get_current_time`
-- **功能**：查詢當前日期和時間
-- **參數**：
-  - `format`: 時間格式 (`'full'` | `'time_only'` | `'date_only'`)
-  - `timezone`: 時區 (預設: `'Asia/Taipei'`)
-- **使用方式**：向 AI 詢問 "現在幾點？" 或 "今天是幾號？"
-
-### 添加新工具
-
-1. **定義工具函數**
-```typescript
-function myToolFunction(params: any): any {
-  // 工具邏輯
-  return result;
-}
-
-async function myToolInvoke(runContext: any, input: string): Promise<any> {
-  let params = {};
-  try {
-    if (input && input.trim()) {
-      params = JSON.parse(input);
-    }
-  } catch (e) {
-    // 使用預設參數
-  }
-  return myToolFunction(params);
-}
+```bash
+npm run dev-full
 ```
 
-2. **在 Agent 中註冊工具**
-```typescript
-const agent = new RealtimeAgent({
-  tools: [
-    {
-      type: 'function',
-      name: 'my_tool',
-      description: '工具描述',
-      parameters: {
-        type: 'object',
-        properties: {
-          // 參數定義
-        },
-        required: [],
-        additionalProperties: false
-      },
-      strict: false,
-      needsApproval: async () => false,
-      invoke: myToolInvoke
-    }
-  ]
-});
-```
+會啟動：
 
-## 🏗️ 項目結構
+- MCP 代理：`http://localhost:3001`
+- Gemini 後端：`http://localhost:8001`
+- Email MCP：`http://localhost:8082/mcp`（若未禁用）
+- 前端：`http://localhost:5173`
+
+### 4. 使用
+
+開啟 http://localhost:5173/，點擊「開始對話」→ 選擇模型（GPT Realtime 或 Gemini Live）→ 建立連線後即可語音/文字對話。
+
+## 專案結構
 
 ```
-src/
-├── agent.ts          # Realtime Agent 核心邏輯
-├── App.tsx           # React 主應用
-├── App.css           # 樣式定義
-├── main.tsx          # 應用入口
-└── vite-env.d.ts     # TypeScript 聲明
+first-agent/
+├── src/
+│   ├── agent.ts           # OpenAI Realtime Agent
+│   ├── geminiLive.ts      # Gemini Live 連線與麥克風
+│   ├── App.tsx            # 主應用與路由視圖
+│   ├── theme.tsx          # 深色/淺色主題
+│   ├── sessionHandler.ts  # 訊息與事件處理
+│   ├── components/        # WelcomePage, ModelSelection, ConversationView, ConversationHistory, ThemeToggle 等
+│   ├── tools/             # get_current_time 等工具定義
+│   ├── mcp/               # MCP 客戶端（grounding、email）
+│   └── utils/             # conversationHistory 儲存
+├── mcp-proxy-server.js    # MCP 代理（ephemeral token、MCP tools、Gemini Live WebSocket）
+├── gemini_backend.py      # Gemini Live 後端 API
+├── package.json
+└── .env.example
 ```
 
-## 🎯 核心實現
+## 腳本說明
 
-### Agent 配置
-```typescript
-const agent = new RealtimeAgent({
-  name: 'Assistant',
-  instructions: '智能助手指令',
-  tools: [/* 工具定義 */]
-});
+| 腳本 | 說明 |
+|------|------|
+| `npm run dev` | 僅啟動 Vite 前端 |
+| `npm run mcp-server` | 僅啟動 MCP 代理 |
+| `npm run gemini-backend` | 僅啟動 Gemini 後端 |
+| `npm run email-mcp` | 僅啟動 Email MCP（在 `mcp_sent_mail`，port 8082） |
+| `npm run dev-full` | 同時啟動上述四項（開發推薦） |
+| `npm run build` | 建置生產版 |
+| `npm run preview` | 預覽建置結果 |
 
-const session = new RealtimeSession(agent, {
-  model: 'gpt-4o-mini-realtime-preview'
-});
-```
+## 工具與 MCP
 
-### 事件監聽
-```typescript
-session.on('response.text.delta', (event) => {
-  // 處理實時文字串流
-});
+- **內建工具**：`get_current_time`（可於 `src/tools/` 擴充）
+- **MCP**：由 `mcp-proxy-server.js` 連接 grounding-mcp（stdio）、mcp_rag_server（stdio）、mcp_sent_mail（http-streamable，預設 `http://localhost:8082/mcp`）
 
-session.on('conversation.item.input_audio_transcription.delta', (event) => {
-  // 處理語音識別結果
-});
-```
+API Key 由後端與 `.env` 管理，不暴露於前端程式碼。
 
-### 工具調用流程
-1. 用戶詢問需要工具的問題
-2. AI 自動識別並調用對應工具
-3. 工具執行並返回結果
-4. AI 基於工具結果生成回應
+## 故障排除
 
-## 🐛 調試功能
+- **無法連線**：確認已執行 `npm run dev-full`，或手動啟動 MCP 代理與前端。
+- **GPT 連線失敗**：檢查 `first-agent/.env` 的 `OPENAI_API_KEY`。
+- **Gemini 無法使用**：確認已執行 `gcloud auth application-default login` 且 `GOOGLE_CLOUD_PROJECT` 已設定。
+- **麥克風無效**：允許瀏覽器麥克風權限，並使用 HTTPS 或 localhost。
 
-### 測試按鈕
-- 🧪 測試 AI 回應
-- 🎤 測試語音識別  
-- 🔧 測試事件系統
-- 🕒 測試時間工具
-- ⏰ 模擬時間查詢
+## 相關資源
 
-### 控制台日志
-- 🌟 事件監聽
-- 🕒 工具調用
-- 📤 數據傳輸
-- ❌ 錯誤信息
+- [專案根目錄 README](../README.md)：整體說明、介面預覽、快速開始
+- [OpenAI Realtime API](https://platform.openai.com/docs/api-reference/realtime)
+- [@openai/agents-realtime](https://www.npmjs.com/package/@openai/agents-realtime)
 
-## 🔍 常見問題
-
-### Q: AI 不調用工具怎麼辦？
-A: 確保工具在 `RealtimeAgent` 創建時就配置，不要在連接後配置。
-
-### Q: 工具調用失敗怎麼辦？
-A: 檢查 `invoke` 函數簽名是否正確：
-```typescript
-async function toolInvoke(runContext: any, input: string): Promise<any>
-```
-
-### Q: 語音識別不工作？
-A: 確保瀏覽器允許麥克風權限，並且使用 HTTPS 或 localhost。
-
-## 📚 相關資源
-
-- [OpenAI Realtime API 文檔](https://platform.openai.com/docs/api-reference/realtime)
-- [@openai/agents-realtime SDK](https://www.npmjs.com/package/@openai/agents-realtime)
-- [React 官方文檔](https://react.dev/)
-- [Vite 官方文檔](https://vitejs.dev/)
-
-## 🔐 安全注意事項
-
-### API Key 管理
-- ❌ **絕對不要** 在客戶端代碼中硬編碼 API Key
-- ❌ **絕對不要** 將 `.env` 文件提交到 git
-- ✅ 使用 `.env` 文件在本地開發（已加入 `.gitignore`）
-- ✅ 生產環境中使用環境變量或安全的配置管理
-- ✅ 定期輪換 API Key
-
-### 設置步驟
-1. 複製 `.env.example` 為 `.env`：
-   ```bash
-   cp .env.example .env
-   ```
-
-2. 在 `.env` 中填入你的 API Key：
-   ```
-   OPENAI_API_KEY=your_actual_api_key_here
-   ```
-
-3. 確保 `.env` 不會被提交：
-   ```bash
-   git status  # .env 不應該出現在未跟蹤文件中
-   ```
-
-### 生產環境建議
-- 使用後端代理 API 調用
-- 實施 API 調用限制和監控
-- 定期檢查 API 使用量和費用
-- 使用 HTTPS 加密傳輸
-
-### 如果意外洩露 API Key
-1. 立即到 [OpenAI Dashboard](https://platform.openai.com/api-keys) 撤銷舊的 API Key
-2. 生成新的 API Key
-3. 更新你的 `.env` 文件
-4. 清理 git 歷史（如本項目已完成）
-
-## 📄 許可證
+## 許可證
 
 MIT License
-
----
-
-## 🎉 更新日志
-
-### v1.0.0 (2025-09-03)
-- ✅ 實現 Realtime API 集成
-- ✅ 支持實時語音對話
-- ✅ 支持實時文字串流
-- ✅ 實現工具調用功能 (`get_current_time`)
-- ✅ 完整的調試和測試功能
-- ✅ 解決工具不被調用的關鍵問題

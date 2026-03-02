@@ -21,15 +21,11 @@ A Model Context Protocol (MCP) server that provides Google search grounding capa
    GEMINI_API_KEY=your_api_key_here
    ```
 
-3. **Run the Server**:
-   ```bash
-   /Users/cfh00896102/.local/bin/uv run --directory /path/to/grounding-mcp python grounding_mcp/server.py
-   ```
-
-   Or if you have uv in your PATH:
+3. **Run the Server** (from repo root or this directory):
    ```bash
    uv run --directory /path/to/grounding-mcp python grounding_mcp/server.py
    ```
+   Replace `/path/to/grounding-mcp` with the actual path (e.g. `openai-realtimegpt/grounding-mcp`).
 
 ## Usage
 
@@ -55,19 +51,22 @@ Performs a search query with Google search grounding and returns results with ci
 
 ## MCP Client Configuration
 
-To use this server with an MCP client, add the following configuration:
+**In this repo**: The `first-agent` app uses `mcp-proxy-server.js` to start this server via **stdio** (path: `openai-realtimegpt/grounding-mcp`). No extra client config needed when running `npm run dev-full`.
+
+For other MCP clients:
 
 ```json
 {
   "mcpServers": {
     "grounding-search": {
-      "command": "/Users/cfh00896102/.local/bin/uv",
+      "command": "uv",
       "args": ["run", "--directory", "/path/to/grounding-mcp", "python", "grounding_mcp/server.py"],
       "cwd": "/path/to/grounding-mcp"
     }
   }
 }
 ```
+Replace `/path/to/grounding-mcp` with your actual path (e.g. the repo's `grounding-mcp` folder).
 
 ## Development
 
