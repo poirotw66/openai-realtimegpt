@@ -22,6 +22,10 @@
 - **持久化儲存**：選擇的模式會自動儲存
 - **完整支援**：所有頁面和元件都支援主題切換
 
+### 🤖 模型選擇
+- **GPT Realtime**：OpenAI 即時語音模型
+- **Gemini Live**：Google Vertex AI 即時語音模型（需設定 GCP 專案與 `gcloud auth application-default login`）
+
 ### 🎛️ 連線控制
 - **暫停/繼續**：可暫停與模型的連線（WebRTC 模式），重新連線後繼續對話
 - **掛斷連線**：結束與模型的連線
@@ -55,18 +59,24 @@
    cp .env.example .env
    ```
    
-   編輯 `.env`，填入你的 OpenAI API Key：
+   編輯 `.env`，至少填入 OpenAI API Key（用於 GPT Realtime）：
    ```
    OPENAI_API_KEY=your_api_key_here
    ```
+   
+   **可選**（依功能需要）：
+   - **Gemini Live**：`GOOGLE_CLOUD_PROJECT`、`VITE_GOOGLE_CLOUD_PROJECT`，並執行 `gcloud auth application-default login`
+   - **Email MCP**：於 `mcp_sent_mail/.env` 設定 `EMAIL_ACCOUNT`、`EMAIL_PASSWORD`；或設 `EMAIL_MCP_DISABLED=true` 關閉
 
 3. **啟動服務**
    ```bash
    npm run dev-full
    ```
    
-   這個命令會同時啟動：
+   此命令會同時啟動：
    - MCP 代理伺服器（`http://localhost:3001`）
+   - Gemini 後端（`gemini_backend.py`）
+   - Email MCP 伺服器（`http://localhost:8082/mcp`，若未禁用）
    - 前端開發伺服器（`http://localhost:5173`）
 
 4. **開啟瀏覽器**
@@ -77,8 +87,8 @@
 
 ### 基本流程
 
-1. **選擇模型**：在模型選擇頁面選擇「GPT Realtime」
-2. **建立連線**：系統會自動從後端取得 ephemeral token 並建立連線
+1. **選擇模型**：在模型選擇頁面選擇「GPT Realtime」或「Gemini Live」（Gemini 需已設定 GCP）
+2. **建立連線**：系統會自動從後端取得 token 並建立連線
 3. **開始對話**：對麥克風說話，AI 會即時回應
 4. **查看對話**：所有對話內容會即時顯示在對話框中
 
@@ -99,24 +109,30 @@
 
 ```
 openai-realtimegpt/
-├── first-agent/              # 前端應用
+├── first-agent/                 # 前端與後端代理
 │   ├── src/
-│   │   ├── agent.ts         # Realtime Agent 核心邏輯
-│   │   ├── App.tsx          # React 主應用
-│   │   ├── theme.tsx        # 主題管理（深色/淺色模式）
-│   │   ├── sessionHandler.ts # 事件處理和訊息顯示
-│   │   ├── components/      # React 元件
+│   │   ├── agent.ts             # OpenAI Realtime Agent 核心邏輯
+│   │   ├── geminiLive.ts        # Gemini Live 整合
+│   │   ├── App.tsx              # React 主應用
+│   │   ├── theme.tsx            # 主題管理（深色/淺色模式）
+│   │   ├── sessionHandler.ts    # 事件處理和訊息顯示
+│   │   ├── components/          # React 元件
 │   │   │   ├── WelcomePage.tsx
 │   │   │   ├── ModelSelection.tsx
 │   │   │   ├── ConversationView.tsx
-│   │   │   └── ThemeToggle.tsx
-│   │   ├── tools/           # AI 工具定義
-│   │   └── mcp/             # MCP 整合
-│   ├── mcp-proxy-server.js  # MCP 代理伺服器
+│   │   │   ├── ConversationHistory.tsx
+│   │   │   ├── ConnectionView.tsx
+│   │   │   ├── ThemeToggle.tsx
+│   │   │   └── ...
+│   │   ├── tools/               # AI 工具定義
+│   │   └── mcp/                 # MCP 整合（grounding、email 等）
+│   ├── mcp-proxy-server.js     # MCP 代理伺服器
+│   ├── gemini_backend.py       # Gemini Live 後端
 │   └── package.json
-├── grounding-mcp/           # Google Search MCP Server
-├── mcp_rag_server/          # RAG MCP Server
-└── readme.md                # 本檔案
+├── grounding-mcp/              # Google Search MCP Server
+├── mcp_rag_server/             # RAG MCP Server
+├── mcp_sent_mail/              # Email MCP Server（可選）
+└── README.md                   # 本檔案
 ```
 
 ## 🎨 UI/UX 特色
@@ -141,7 +157,8 @@ openai-realtimegpt/
 - **傳輸協議**：WebRTC（瀏覽器）或 WebSocket
 
 ### 模型配置
-- **預設模型**：`gpt-realtime-mini-2025-12-15`
+- **OpenAI**：預設 `gpt-realtime-mini-2025-12-15`，可於程式或環境變數調整
+- **Gemini Live**：透過 Vertex AI，需設定 `GOOGLE_CLOUD_PROJECT` 與 gcloud 驗證
 - **語言設定**：繁體中文（可切換為英文）
 - **語音轉錄**：自動轉錄使用者語音為文字
 
@@ -153,8 +170,9 @@ openai-realtimegpt/
 ## 🐛 故障排除
 
 ### 連線問題
-- **無法連線**：確保 MCP 代理伺服器正在運行（`npm run dev-full`）
-- **API Key 錯誤**：檢查 `.env` 檔案中的 `OPENAI_API_KEY` 是否正確
+- **無法連線**：確保已執行 `npm run dev-full`（在 `first-agent` 目錄），MCP 代理與前端皆已啟動
+- **API Key 錯誤**：檢查 `first-agent/.env` 中的 `OPENAI_API_KEY` 是否正確
+- **Gemini Live 無法使用**：確認已執行 `gcloud auth application-default login` 且 `GOOGLE_CLOUD_PROJECT` 已設定
 - **麥克風權限**：確保瀏覽器允許麥克風權限
 
 ### 顯示問題
@@ -188,13 +206,17 @@ openai-realtimegpt/
 
 ## 📝 更新日誌
 
-### v2.0.0 (2025-02-03)
+### v2.0.0 (2026-02-03)
 - ✨ 新增深色/淺色模式切換功能
 - 🎨 優化 UI 設計，採用 GPT-like 聊天介面
 - 🎤 修復使用者語音轉錄顯示問題
 - ⏸️ 新增暫停/繼續功能（WebRTC 模式）
 - 🔄 改進連線狀態顯示和用戶體驗
 - 🐛 修復測試音檔轉錄顯示問題
+
+### v2.1.0 (2026-03-02)
+- 📖 README 更新：補充 Gemini Live、Email MCP、環境變數與專案結構說明
+- 🤖 文件說明模型選擇（GPT Realtime / Gemini Live）與 `dev-full` 啟動服務
 
 ### v1.0.0 (2025-09-03)
 - ✅ 實現 Realtime API 集成

@@ -48,7 +48,7 @@ const mcpServers = {
 // Add email MCP server if enabled (default: enabled, set EMAIL_MCP_DISABLED=true to disable)
 if (!process.env.EMAIL_MCP_DISABLED) {
   // Default to local server if EMAIL_MCP_URL not set (for npm run dev-full integration)
-  const defaultEmailMCPUrl = process.env.EMAIL_MCP_URL || 'http://localhost:8080/mcp';
+  const defaultEmailMCPUrl = process.env.EMAIL_MCP_URL || 'http://localhost:8082/mcp';
   mcpServers.email = {
     type: 'http-streamable',
     url: defaultEmailMCPUrl,
