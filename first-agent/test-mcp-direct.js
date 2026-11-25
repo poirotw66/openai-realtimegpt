@@ -29,7 +29,6 @@ async function testMCPServer() {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      GEMINI_API_KEY: 'REMOVED_SENSITIVE_VALUE'
     }
   });
 

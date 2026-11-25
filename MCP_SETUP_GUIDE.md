@@ -111,7 +111,7 @@ cd /Users/cfh00896102/Github/openai-realtimegpt/grounding-mcp
 ```javascript
 env: {
   ...process.env,
-  GEMINI_API_KEY: 'REMOVED_SENSITIVE_VALUE'
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY
 }
 ```
 

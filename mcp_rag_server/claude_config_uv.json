@@ -10,7 +10,7 @@
         "grounding_mcp/server.py"
       ],
       "env": {
-        "GEMINI_API_KEY": "REMOVED_SENSITIVE_VALUE"
+        "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY"
       }
     },
     "m365-rag-agent": {
@@ -23,7 +23,7 @@
         "server.py"
       ],
       "env": {
-        "GOOGLE_API_KEY": "REMOVED_SENSITIVE_VALUE"
+        "GOOGLE_API_KEY": "YOUR_GEMINI_API_KEY"
       }
     }
   }

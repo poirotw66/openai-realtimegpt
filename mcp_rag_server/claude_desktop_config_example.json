@@ -4,7 +4,7 @@
       "command": "python3",
       "args": ["/Users/cfh00896102/Github/m365_rag_agent/mcp_rag_server/server.py"],
       "env": {
-        "GOOGLE_API_KEY": "REMOVED_SENSITIVE_VALUE"
+        "GOOGLE_API_KEY": "YOUR_GEMINI_API_KEY"
       }
     }
   }
